@@ -8,10 +8,11 @@ import {
   upsertUserRole,
 } from '../utils/userRoleService.js';
 import { attachAccountRole, findClientById, findClients } from '../utils/accountService.js';
+import { getStaffWorkloads, DEFAULT_DAILY_CAPACITY, parseDateInput } from '../utils/staffWorkloadService.js';
 
 // Create user (Admin only)
 export const createUser = asyncHandler(async (req, res) => {
-  const { name, email, password, role, phone, address } = req.body;
+  const { name, email, password, role, phone, address, dailyCapacity } = req.body;
   const normalizedEmail = email?.trim().toLowerCase();
 
   if (!name || !normalizedEmail || !password) {
@@ -49,6 +50,9 @@ export const createUser = asyncHandler(async (req, res) => {
       password,
       phone,
       address,
+      ...(role === 'staff'
+        ? { dailyCapacity: Math.max(1, Number(dailyCapacity) || DEFAULT_DAILY_CAPACITY) }
+        : {}),
     });
 
     await upsertUserRole(user._id, role);
@@ -102,7 +106,7 @@ export const getUser = asyncHandler(async (req, res) => {
 
 // Update user
 export const updateUser = asyncHandler(async (req, res) => {
-  const { name, email, phone, address, role, isActive } = req.body;
+  const { name, email, phone, address, role, isActive, dailyCapacity } = req.body;
   const normalizedEmail = email?.trim().toLowerCase();
 
   let user = await User.findById(req.params.id);
@@ -144,6 +148,9 @@ export const updateUser = asyncHandler(async (req, res) => {
   if (phone) user.phone = phone;
   if (address) user.address = address;
   if (isActive !== undefined && req.user.role === 'admin') user.isActive = isActive;
+  if (dailyCapacity !== undefined && req.user.role === 'admin' && !isClientAccount) {
+    user.dailyCapacity = Math.max(1, Number(dailyCapacity) || DEFAULT_DAILY_CAPACITY);
+  }
 
   await user.save();
 
@@ -198,5 +205,27 @@ export const getStaffMembers = asyncHandler(async (req, res) => {
     success: true,
     count: staffMembers.length,
     staffMembers,
+  });
+});
+
+// Get per-staff daily workload (Admin only)
+export const getStaffWorkload = asyncHandler(async (req, res) => {
+  const { date, excludeOrderId } = req.query;
+  const targetDate = date ? parseDateInput(date) : new Date();
+
+  if (Number.isNaN(targetDate.getTime())) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid date format. Use YYYY-MM-DD',
+    });
+  }
+
+  const workloads = await getStaffWorkloads(targetDate, excludeOrderId || null);
+  const dateLabel = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+
+  res.status(200).json({
+    success: true,
+    date: dateLabel,
+    workloads,
   });
 });

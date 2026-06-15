@@ -1,563 +1,519 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Users, UserPlus, Search, PhoneCall, Mail, Wallet, MapPin, X, Download, Edit2, Trash2 } from 'lucide-react';
-import toast from 'react-hot-toast';
-import FeatureWorkspace from '../components/common/FeatureWorkspace';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/common/Card';
-import { Button } from '../components/common/Button';
-import { api, orderAPI, userAPI } from '../services/api';
+import { useEffect, useMemo, useState } from "react"
+import {
+  Users,
+  UserPlus,
+  Download,
+  Edit2,
+  Trash2,
+  MoreHorizontal,
+  Mail,
+  Phone,
+  MapPin,
+  Wallet,
+  ShoppingCart,
+  TrendingUp,
+} from "lucide-react"
+import { toast } from "sonner"
+import { api, orderAPI, userAPI } from "@/services/api"
+import PageHeader from "@/components/shared/PageHeader"
+import DataTable from "@/components/shared/DataTable"
+import StatCard from "@/components/shared/StatCard"
+import StatusBadge, { PaymentStatusBadge } from "@/components/shared/StatusBadge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent } from "@/components/ui/card"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Separator } from "@/components/ui/separator"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { formatCurrency, formatDate, getInitials, resolveCustomerPaymentStatus } from "@/lib/utils"
 
-const Customers = () => {
-  const [customers, setCustomers] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
-  const [savingCustomer, setSavingCustomer] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState(null);
+const tierVariant = (tier) => {
+  if (tier === "VIP") return "default"
+  if (tier === "Business") return "secondary"
+  return "outline"
+}
+
+export default function Customers() {
+  const [customers, setCustomers] = useState([])
+  const [orders, setOrders] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showCustomerModal, setShowCustomerModal] = useState(false)
+  const [savingCustomer, setSavingCustomer] = useState(false)
+  const [editingCustomer, setEditingCustomer] = useState(null)
+  const [deleteCustomerId, setDeleteCustomerId] = useState(null)
+  const [selectedCustomer, setSelectedCustomer] = useState(null)
   const [customerFormData, setCustomerFormData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    address: '',
-  });
-
-  useEffect(() => {
-    const loadCustomerData = async () => {
-      try {
-        setLoading(true);
-
-        const [customersResponse, ordersResponse] = await Promise.all([
-          userAPI.getAll({ role: 'client' }),
-          orderAPI.getAll(),
-        ]);
-
-        setCustomers(customersResponse.data?.users || []);
-        setOrders(ordersResponse.data?.orders || []);
-      } catch (error) {
-        toast.error('Failed to load customers');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadCustomerData();
-  }, []);
+    name: "",
+    email: "",
+    phone: "",
+    address: "",
+  })
 
   const reloadCustomerData = async () => {
     try {
-      setLoading(true);
-
+      setLoading(true)
       const [customersResponse, ordersResponse] = await Promise.all([
-        userAPI.getAll({ role: 'client' }),
+        userAPI.getAll({ role: "client" }),
         orderAPI.getAll(),
-      ]);
-
-      setCustomers(customersResponse.data?.users || []);
-      setOrders(ordersResponse.data?.orders || []);
-    } catch (error) {
-      toast.error('Failed to refresh customers');
+      ])
+      setCustomers(customersResponse.data?.users || [])
+      setOrders(ordersResponse.data?.orders || [])
+    } catch {
+      toast.error("Failed to load customers")
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
+
+  useEffect(() => {
+    reloadCustomerData()
+  }, [])
 
   const customerRows = useMemo(() => {
-    const rows = customers.map((customer) => {
-      const customerOrders = orders.filter((order) => order.userId?._id === customer._id);
-      const totalSpent = customerOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
-      const deliveredOrders = customerOrders.filter((order) => order.status === 'delivered').length;
-      const location = customer.address?.trim() || 'No address provided';
-      const tier =
-        customerOrders.length >= 10 ? 'VIP' : customerOrders.length >= 4 ? 'Business' : 'Standard';
+    return customers.map((customer) => {
+      const customerOrders = orders.filter((order) => order.userId?._id === customer._id)
+      const totalSpent = customerOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0)
+      const deliveredOrders = customerOrders.filter((order) => order.status === "delivered").length
+      const location = customer.address?.trim() || "No address provided"
+      const tier = customerOrders.length >= 10 ? "VIP" : customerOrders.length >= 4 ? "Business" : "Standard"
+
+      const serviceCounts = customerOrders.reduce((acc, order) => {
+        order.items?.forEach((item) => {
+          const name = item.serviceName || item.itemType || "Other"
+          acc[name] = (acc[name] || 0) + 1
+        })
+        return acc
+      }, {})
+      const favoriteService = Object.entries(serviceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A"
+      const paymentStatus = resolveCustomerPaymentStatus(customerOrders)
+      const unpaidOrders = customerOrders.filter((order) => order.paymentStatus !== "paid").length
 
       return {
         id: customer._id,
-        name: customer.name || 'Unnamed Customer',
+        customer,
+        name: customer.name || "Unnamed Customer",
         tier,
-        status: customer.isActive !== false ? 'Active' : 'Inactive',
+        status: customer.isActive !== false ? "active" : "inactive",
+        paymentStatus,
+        unpaidOrders,
         orders: customerOrders.length,
         totalSpent,
-        balance: `$${totalSpent.toFixed(2)}`,
         location,
-        email: customer.email || 'N/A',
-        phone: customer.phone || 'N/A',
+        email: customer.email || "N/A",
+        phone: customer.phone || "N/A",
         deliveredOrders,
-      };
-    });
-
-    if (!searchTerm.trim()) {
-      return rows;
-    }
-
-    const query = searchTerm.trim().toLowerCase();
-    return rows.filter((customer) =>
-      customer.name.toLowerCase().includes(query) ||
-      customer.location.toLowerCase().includes(query) ||
-      customer.tier.toLowerCase().includes(query) ||
-      customer.email.toLowerCase().includes(query) ||
-      customer.phone.toLowerCase().includes(query)
-    );
-  }, [customers, orders, searchTerm]);
+        favoriteService,
+        recentOrders: customerOrders.slice(0, 5),
+      }
+    })
+  }, [customers, orders])
 
   const stats = useMemo(() => {
-    const totalCustomers = customers.length;
-    const activeCustomers = customers.filter((customer) => customer.isActive !== false).length;
-    const totalRevenue = customerRows.reduce((sum, customer) => sum + Number(customer.totalSpent || 0), 0);
+    const activeCustomers = customers.filter((c) => c.isActive !== false).length
+    const totalRevenue = customerRows.reduce((sum, c) => sum + c.totalSpent, 0)
+    return { total: customers.length, active: activeCustomers, revenue: totalRevenue }
+  }, [customers, customerRows])
 
-    return [
-      {
-        label: 'Total Customers',
-        value: loading ? '...' : String(totalCustomers),
-        badge: 'Live',
-        icon: Users,
-        tone: 'sky',
-        helper: 'Registered client accounts in the system',
-      },
-      {
-        label: 'Active Accounts',
-        value: loading ? '...' : String(activeCustomers),
-        badge: 'Healthy',
-        icon: UserPlus,
-        tone: 'emerald',
-        helper: 'Customers with active accounts',
-      },
-      {
-        label: 'Customer Revenue',
-        value: loading ? '...' : `$${totalRevenue.toFixed(2)}`,
-        badge: 'Orders',
-        icon: Wallet,
-        tone: 'amber',
-        helper: 'Combined order value for customer accounts listed here',
-      },
-    ];
-  }, [customerRows, customers, loading]);
-
-  const customerInsights = useMemo(() => {
-    const vipCustomers = customerRows.filter((customer) => customer.tier === 'VIP').length;
-    const inactiveCustomers = customerRows.filter((customer) => customer.status === 'Inactive').length;
-    const returningCustomers = customerRows.filter((customer) => customer.orders > 1).length;
-
-    return [
-      `${vipCustomers} VIP customer${vipCustomers === 1 ? '' : 's'} currently in the system`,
-      `${returningCustomers} customer${returningCustomers === 1 ? '' : 's'} placed more than one order`,
-      inactiveCustomers > 0
-        ? `${inactiveCustomers} customer account${inactiveCustomers === 1 ? ' is' : 's are'} inactive`
-        : 'All customer accounts are currently active',
-    ];
-  }, [customerRows]);
-
-  const regionalSpread = useMemo(() => {
-    const counts = customerRows.reduce((accumulator, customer) => {
-      accumulator[customer.location] = (accumulator[customer.location] || 0) + 1;
-      return accumulator;
-    }, {});
-
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 4);
-  }, [customerRows]);
-
-  const handleCustomerInputChange = (e) => {
-    const { name, value } = e.target;
-    setCustomerFormData((prev) => ({
-      ...prev,
-      [name]: name === 'email' ? value.trim().toLowerCase() : value,
-    }));
-  };
-
-  const closeAddCustomerModal = () => {
-    setShowAddCustomerModal(false);
-    setEditingCustomer(null);
-    setCustomerFormData({
-      name: '',
-      email: '',
-      phone: '',
-      address: '',
-    });
-  };
+  const closeCustomerModal = () => {
+    setShowCustomerModal(false)
+    setEditingCustomer(null)
+    setCustomerFormData({ name: "", email: "", phone: "", address: "" })
+  }
 
   const handleCreateCustomer = async (e) => {
-    e.preventDefault();
-
+    e.preventDefault()
     if (!customerFormData.name || !customerFormData.email) {
-      toast.error('Please fill in name and email');
-      return;
+      toast.error("Please fill in name and email")
+      return
     }
-
-    setSavingCustomer(true);
-
+    setSavingCustomer(true)
     try {
       if (editingCustomer) {
-        await userAPI.update(editingCustomer.id, {
-          name: customerFormData.name,
-          email: customerFormData.email,
-          phone: customerFormData.phone,
-          address: customerFormData.address,
-        });
-        toast.success('Customer updated successfully');
+        await userAPI.update(editingCustomer.id, customerFormData)
+        toast.success("Customer updated successfully")
       } else {
-        await api.post('/users', {
-          ...customerFormData,
-          role: 'client',
-          password: 'temp_password_123',
-        });
-        toast.success('Customer created successfully');
+        await api.post("/users", { ...customerFormData, role: "client", password: "temp_password_123" })
+        toast.success("Customer created successfully")
       }
-
-      closeAddCustomerModal();
-      await reloadCustomerData();
+      closeCustomerModal()
+      await reloadCustomerData()
     } catch (error) {
-      toast.error(error.response?.data?.message || `Failed to ${editingCustomer ? 'update' : 'create'} customer`);
+      toast.error(error.response?.data?.message || `Failed to ${editingCustomer ? "update" : "create"} customer`)
     } finally {
-      setSavingCustomer(false);
+      setSavingCustomer(false)
     }
-  };
+  }
 
-  const handleEditCustomer = (customer) => {
-    setEditingCustomer(customer);
+  const handleEditCustomer = (row) => {
+    setEditingCustomer(row)
     setCustomerFormData({
-      name: customer.name,
-      email: customer.email,
-      phone: customer.phone === 'N/A' ? '' : customer.phone,
-      address: customer.location === 'No address provided' ? '' : customer.location,
-    });
-    setShowAddCustomerModal(true);
-  };
+      name: row.name,
+      email: row.email,
+      phone: row.phone === "N/A" ? "" : row.phone,
+      address: row.location === "No address provided" ? "" : row.location,
+    })
+    setShowCustomerModal(true)
+  }
 
-  const handleDeleteCustomer = async (customerId) => {
-    if (!window.confirm('Are you sure you want to delete this customer?')) {
-      return;
-    }
-
+  const handleConfirmDelete = async () => {
+    if (!deleteCustomerId) return
     try {
-      await userAPI.delete(customerId);
-      toast.success('Customer deleted successfully');
-      await reloadCustomerData();
+      await userAPI.delete(deleteCustomerId)
+      toast.success("Customer deleted successfully")
+      if (selectedCustomer?.id === deleteCustomerId) setSelectedCustomer(null)
+      await reloadCustomerData()
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to delete customer');
+      toast.error(error.response?.data?.message || "Failed to delete customer")
+    } finally {
+      setDeleteCustomerId(null)
     }
-  };
+  }
 
   const handleExportCustomers = () => {
     if (!customerRows.length) {
-      toast.error('No customers available to export');
-      return;
+      toast.error("No customers available to export")
+      return
     }
-
-    const header = ['Name', 'Email', 'Phone', 'Address', 'Tier', 'Status', 'Orders', 'Revenue'];
-    const lines = customerRows.map((customer) => [
-      customer.name,
-      customer.email,
-      customer.phone,
-      customer.location,
-      customer.tier,
-      customer.status,
-      customer.orders,
-      customer.totalSpent.toFixed(2),
-    ]);
-
+    const header = ["Name", "Email", "Phone", "Address", "Tier", "Status", "Payment Status", "Orders", "Revenue"]
+    const lines = customerRows.map((c) => [
+      c.name, c.email, c.phone, c.location, c.tier, c.status, c.paymentStatus, c.orders, c.totalSpent.toFixed(2),
+    ])
     const csv = [header, ...lines]
-      .map((row) =>
-        row
-          .map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`)
-          .join(',')
-      )
-      .join('\n');
+      .map((row) => row.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n")
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.setAttribute("download", "customers.csv")
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    toast.success("Customers exported successfully")
+  }
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', 'customers.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-    toast.success('Customers exported successfully');
-  };
+  const columns = useMemo(
+    () => [
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Customer",
+        cell: ({ row }) => (
+          <div className="flex items-center gap-3">
+            <Avatar className="h-9 w-9">
+              <AvatarFallback className="bg-primary/10 text-xs font-semibold text-primary">
+                {getInitials(row.original.name)}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <p className="font-semibold">{row.original.name}</p>
+              <p className="text-xs text-muted-foreground">{row.original.location}</p>
+            </div>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "tier",
+        header: "Tier",
+        cell: ({ row }) => <Badge variant={tierVariant(row.original.tier)}>{row.original.tier}</Badge>,
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        accessorKey: "paymentStatus",
+        header: "Payment",
+        cell: ({ row }) => <PaymentStatusBadge status={row.original.paymentStatus} />,
+      },
+      { accessorKey: "orders", header: "Orders" },
+      {
+        accessorKey: "totalSpent",
+        header: "Revenue",
+        cell: ({ row }) => formatCurrency(row.original.totalSpent),
+      },
+      {
+        id: "actions",
+        cell: ({ row }) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setSelectedCustomer(row.original)}>
+                View Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleEditCustomer(row.original)}>
+                <Edit2 className="mr-2 h-4 w-4" />Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => setDeleteCustomerId(row.original.id)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+      },
+    ],
+    []
+  )
 
   return (
-    <>
-      <FeatureWorkspace
-        eyebrow="Customer Hub"
+    <div className="space-y-8">
+      <PageHeader
         title="Customers"
-        description="Track customer profiles, loyalty segments, service history, and account activity from one clean workspace."
-        tone="sky"
-        actions={[
-          {
-            label: 'Export Customers',
-            icon: Download,
-            onClick: handleExportCustomers,
-            className: 'rounded-2xl border-0 bg-sky-100/80 px-5 py-3 text-slate-800 hover:bg-sky-100',
-          },
-          {
-            label: 'Add Customer',
-            icon: UserPlus,
-            variant: 'primary',
-            onClick: () => setShowAddCustomerModal(true),
-            className: 'rounded-2xl bg-[#3a2fd0] px-6 py-3 hover:bg-[#2f26af]',
-          },
-        ]}
-        stats={stats}
-        filters={[
-          {
-            label: 'search',
-            icon: Search,
-            content: (
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search customers, locations, or account tiers..."
-                className="w-[320px] max-w-full bg-transparent text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none"
-              />
-            ),
-          },
-        ]}
-        tableTitle="Customer Directory"
-        tableDescription={
-          loading
-            ? 'Loading customer relationships...'
-            : `A focused view of ${customerRows.length} customer account${customerRows.length === 1 ? '' : 's'} and account health.`
+        description="Track customer profiles, loyalty segments, and service history."
+        icon={Users}
+        action={
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleExportCustomers}>
+              <Download className="mr-2 h-4 w-4" />Export
+            </Button>
+            <Button onClick={() => setShowCustomerModal(true)}>
+              <UserPlus className="mr-2 h-4 w-4" />Add Customer
+            </Button>
+          </div>
         }
-        columns={[
-          {
-            key: 'name',
-            label: 'Customer',
-            render: (value, row) => (
-              <div>
-                <p className="font-semibold text-slate-900">{value}</p>
-                <p className="text-sm text-slate-500">{row.location}</p>
-              </div>
-            ),
-          },
-          {
-            key: 'tier',
-            label: 'Tier',
-            render: (value) => (
-              <span className="rounded-full bg-sky-100 px-3 py-1 text-sm font-medium text-sky-700">
-                {value}
-              </span>
-            ),
-          },
-          {
-            key: 'status',
-            label: 'Status',
-            render: (value) => (
-              <span className={`inline-flex items-center gap-2 ${value === 'Active' ? 'text-emerald-700' : 'text-slate-500'}`}>
-                <span className={`h-2.5 w-2.5 rounded-full ${value === 'Active' ? 'bg-emerald-600' : 'bg-slate-300'}`} />
-                {value}
-              </span>
-            ),
-          },
-          { key: 'orders', label: 'Orders' },
-          { key: 'balance', label: 'Balance' },
-          {
-            key: 'contact',
-            label: 'Contact',
-            render: (_, row) => (
-              <div className="space-y-1 text-sm text-slate-600">
-                <p className="flex items-center gap-2">
-                  <Mail className="h-4 w-4 text-slate-400" />
-                  {row.email}
-                </p>
-                <p className="flex items-center gap-2">
-                  <PhoneCall className="h-4 w-4 text-slate-400" />
-                  {row.phone}
-                </p>
-              </div>
-            ),
-          },
-          {
-            key: 'actions',
-            label: 'Actions',
-            render: (_, row) => (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleEditCustomer(row)}
-                  className="rounded-xl p-2 text-slate-600 transition-colors hover:bg-slate-100"
-                >
-                  <Edit2 className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteCustomer(row.id)}
-                  className="rounded-xl p-2 text-red-600 transition-colors hover:bg-red-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            ),
-          },
-        ]}
-        rows={
-          loading
-            ? [
-                {
-                  id: 'loading',
-                  name: 'Loading customers...',
-                  location: 'Fetching live customer data',
-                  tier: 'Standard',
-                  status: 'Inactive',
-                  orders: '...',
-                  balance: '$0.00',
-                  email: '...',
-                  phone: '...',
-                },
-              ]
-            : customerRows.length > 0
-              ? customerRows
-              : [
-                  {
-                    id: 'empty',
-                    name: 'No customers found',
-                    location: 'Create customer accounts to populate this page',
-                    tier: 'Standard',
-                    status: 'Inactive',
-                    orders: 0,
-                    balance: '$0.00',
-                    email: 'N/A',
-                    phone: 'N/A',
-                  },
-                ]
-        }
-        sidePanels={[
-          {
-            title: 'Customer Insights',
-            description: 'Monitor retention signals and service behavior.',
-            content: (
-              <div className="space-y-4">
-                {(loading ? ['Preparing customer insights...'] : customerInsights).map((item) => (
-                  <div key={item} className="rounded-2xl bg-[#f6fbff] p-4 text-slate-700">
-                    {item}
-                  </div>
-                ))}
-              </div>
-            ),
-          },
-          {
-            title: 'Regional Spread',
-            description: 'Where your strongest customer clusters are located.',
-            content: (
-              <div className="space-y-4">
-                {(loading ? [['Loading locations...', 0]] : regionalSpread.length ? regionalSpread : [['No addresses available', 0]]).map(([item, count]) => (
-                  <div key={item} className="flex items-center justify-between rounded-2xl bg-[#fafaff] p-4">
-                    <div className="flex items-center gap-3 text-slate-700">
-                      <MapPin className="h-5 w-5 text-sky-600" />
-                      {item}
-                    </div>
-                    <span className="text-sm font-semibold text-slate-500">{count} customer{count === 1 ? '' : 's'}</span>
-                  </div>
-                ))}
-              </div>
-            ),
-          },
-        ]}
       />
 
-      {showAddCustomerModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm">
-          <Card className="w-full max-w-lg rounded-[28px] border-sky-100 shadow-[0_30px_80px_rgba(58,47,208,0.18)]">
-            <CardHeader className="border-b border-slate-100 pb-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <CardTitle className="text-2xl">{editingCustomer ? 'Edit Customer' : 'Add Customer'}</CardTitle>
-                  <CardDescription>
-                    {editingCustomer
-                      ? 'Update a customer account directly from this page.'
-                      : 'Create a customer account directly from this page.'}
-                  </CardDescription>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="Total Customers" value={stats.total} icon={Users} loading={loading} />
+        <StatCard label="Active Accounts" value={stats.active} icon={UserPlus} loading={loading} />
+        <StatCard label="Customer Revenue" value={formatCurrency(stats.revenue)} icon={Wallet} loading={loading} />
+      </div>
+
+      <DataTable
+        columns={columns}
+        data={customerRows}
+        searchKey="name"
+        searchPlaceholder="Search customers..."
+        loading={loading}
+        emptyTitle="No customers found"
+        emptyDescription="Add customer accounts to get started."
+      />
+
+      {/* Customer Profile Sheet */}
+      <Sheet open={!!selectedCustomer} onOpenChange={() => setSelectedCustomer(null)}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+          {selectedCustomer && (
+            <div className="space-y-6">
+              <SheetHeader>
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-14 w-14">
+                    <AvatarFallback className="bg-primary/10 text-lg font-bold text-primary">
+                      {getInitials(selectedCustomer.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <SheetTitle>{selectedCustomer.name}</SheetTitle>
+                    <SheetDescription>
+                      <Badge variant={tierVariant(selectedCustomer.tier)} className="mt-1">
+                        {selectedCustomer.tier}
+                      </Badge>
+                    </SheetDescription>
+                  </div>
                 </div>
-                <button
-                  onClick={closeAddCustomerModal}
-                  className="rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100"
-                >
-                  <X className="h-5 w-5" />
-                </button>
+              </SheetHeader>
+
+              <div className="grid grid-cols-2 gap-4">
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <ShoppingCart className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase">Orders</span>
+                    </div>
+                    <p className="mt-2 text-2xl font-bold">{selectedCustomer.orders}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Wallet className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase">Total Spent</span>
+                    </div>
+                    <p className="mt-2 text-2xl font-bold">{formatCurrency(selectedCustomer.totalSpent)}</p>
+                  </CardContent>
+                </Card>
               </div>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <form onSubmit={handleCreateCustomer} className="space-y-5">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Name *</label>
-                  <input
-                    type="text"
-                    name="name"
-                    value={customerFormData.name}
-                    onChange={handleCustomerInputChange}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:border-[#3a2fd0] focus:outline-none focus:ring-2 focus:ring-[#3a2fd0]/15"
-                    required
-                  />
-                </div>
 
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Email *</label>
-                  <input
-                    type="email"
-                    name="email"
-                    value={customerFormData.email}
-                    onChange={handleCustomerInputChange}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:border-[#3a2fd0] focus:outline-none focus:ring-2 focus:ring-[#3a2fd0]/15"
-                    required
-                  />
+              <div className="rounded-[10px] bg-muted/50 p-4">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Payment Status</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <PaymentStatusBadge status={selectedCustomer.paymentStatus} />
+                  {selectedCustomer.unpaidOrders > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      {selectedCustomer.unpaidOrders} unpaid order{selectedCustomer.unpaidOrders === 1 ? "" : "s"}
+                    </span>
+                  )}
                 </div>
+              </div>
 
-                <div className="grid gap-5 md:grid-cols-2">
+              <div className="rounded-[10px] bg-muted/50 p-4">
+                <div className="flex items-center gap-2 text-sm">
+                  <TrendingUp className="h-4 w-4 text-primary" />
+                  <span className="font-semibold">Favorite Service:</span>
+                  <span>{selectedCustomer.favoriteService}</span>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Contact</p>
+                <div className="flex items-center gap-2 text-sm">
+                  <Mail className="h-4 w-4 text-muted-foreground" />{selectedCustomer.email}
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <Phone className="h-4 w-4 text-muted-foreground" />{selectedCustomer.phone}
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <MapPin className="h-4 w-4 text-muted-foreground" />{selectedCustomer.location}
+                </div>
+              </div>
+
+              {selectedCustomer.recentOrders.length > 0 && (
+                <>
+                  <Separator />
                   <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Phone</label>
-                    <input
-                      type="tel"
-                      name="phone"
-                      value={customerFormData.phone}
-                      onChange={handleCustomerInputChange}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:border-[#3a2fd0] focus:outline-none focus:ring-2 focus:ring-[#3a2fd0]/15"
-                    />
+                    <p className="mb-3 text-xs font-semibold uppercase text-muted-foreground">Recent Orders</p>
+                    <div className="space-y-2">
+                      {selectedCustomer.recentOrders.map((order) => (
+                        <div key={order._id} className="flex items-center justify-between rounded-[10px] border border-border p-3">
+                          <div>
+                            <p className="text-sm font-semibold">{order.orderNumber}</p>
+                            <p className="text-xs text-muted-foreground">{formatDate(order.createdAt)}</p>
+                          </div>
+                          <div className="text-right">
+                            <div className="flex flex-wrap justify-end gap-1">
+                              <StatusBadge status={order.status} />
+                              <PaymentStatusBadge status={order.paymentStatus || "pending"} />
+                            </div>
+                            <p className="mt-1 text-sm font-medium">{formatCurrency(order.totalAmount || 0)}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
+                </>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
 
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Address</label>
-                    <input
-                      type="text"
-                      name="address"
-                      value={customerFormData.address}
-                      onChange={handleCustomerInputChange}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:border-[#3a2fd0] focus:outline-none focus:ring-2 focus:ring-[#3a2fd0]/15"
-                    />
-                  </div>
-                </div>
+      {/* Create/Edit Dialog */}
+      <Dialog open={showCustomerModal} onOpenChange={closeCustomerModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingCustomer ? "Edit Customer" : "Add Customer"}</DialogTitle>
+            <DialogDescription>
+              {editingCustomer ? "Update customer account details." : "Create a new customer account."}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateCustomer} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name *</Label>
+              <Input
+                value={customerFormData.name}
+                onChange={(e) => setCustomerFormData((p) => ({ ...p, name: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email *</Label>
+              <Input
+                type="email"
+                value={customerFormData.email}
+                onChange={(e) => setCustomerFormData((p) => ({ ...p, email: e.target.value.trim().toLowerCase() }))}
+                required
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Phone</Label>
+                <Input
+                  value={customerFormData.phone}
+                  onChange={(e) => setCustomerFormData((p) => ({ ...p, phone: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Address</Label>
+                <Input
+                  value={customerFormData.address}
+                  onChange={(e) => setCustomerFormData((p) => ({ ...p, address: e.target.value }))}
+                />
+              </div>
+            </div>
+            {!editingCustomer && (
+              <p className="rounded-[10px] bg-muted/50 p-3 text-sm text-muted-foreground">
+                New accounts use temporary password: <span className="font-semibold">temp_password_123</span>
+              </p>
+            )}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeCustomerModal}>Cancel</Button>
+              <Button type="submit" loading={savingCustomer}>
+                {editingCustomer ? "Update Customer" : "Create Customer"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-                <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  {editingCustomer
-                    ? 'Update customer details here without affecting other accounts.'
-                    : <>New customer accounts are created with a temporary password: <span className="font-semibold">temp_password_123</span></>}
-                </p>
-
-                <div className="flex gap-4 pt-2">
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    className="flex-1 rounded-2xl bg-[#3a2fd0] py-3 hover:bg-[#2f26af]"
-                    disabled={savingCustomer}
-                  >
-                    {savingCustomer ? (editingCustomer ? 'Saving...' : 'Creating...') : (editingCustomer ? 'Update Customer' : 'Create Customer')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={closeAddCustomerModal}
-                    className="flex-1 rounded-2xl py-3"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-    </>
-  );
-};
-
-export default Customers;
+      <AlertDialog open={!!deleteCustomerId} onOpenChange={() => setDeleteCustomerId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Customer</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this customer? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}

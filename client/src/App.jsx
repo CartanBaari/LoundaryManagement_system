@@ -1,268 +1,91 @@
-import { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import Navbar from './components/common/Navbar';
-import Sidebar from './components/common/Sidebar';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Dashboard from './pages/Dashboard';
-import Orders from './pages/Orders';
-import Users from './pages/Users';
-import Services from './pages/Services';
-import ItemsCategories from './pages/ItemsCategories';
-import Customers from './pages/Customers';
-import Staff from './pages/Staff';
-import Payments from './pages/Payments';
-import PickupDelivery from './pages/PickupDelivery';
-import Inventory from './pages/Inventory';
-import Reports from './pages/Reports';
-import Notifications from './pages/Notifications';
-import Settings from './pages/Settings';
-import './index.css';
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
+import { AuthProvider, useAuth } from "./context/AuthContext"
+import { ThemeProvider } from "@/components/theme-provider"
+import { Toaster } from "@/components/ui/sonner"
+import AppLayout, { AuthLoadingScreen } from "@/components/layout/AppLayout"
+import Login from "./pages/Login"
+import Register from "./pages/Register"
+import Dashboard from "./pages/Dashboard"
+import Orders from "./pages/Orders"
+import Users from "./pages/Users"
+import Services from "./pages/Services"
+import ItemsCategories from "./pages/ItemsCategories"
+import Customers from "./pages/Customers"
+import Staff from "./pages/Staff"
+import Payments from "./pages/Payments"
+import Invoices from "./pages/Invoices"
+import PickupDelivery from "./pages/PickupDelivery"
+import Inventory from "./pages/Inventory"
+import Reports from "./pages/Reports"
+import Notifications from "./pages/Notifications"
+import Settings from "./pages/Settings"
+import { Button } from "@/components/ui/button"
+import "./index.css"
 
-// Protected Route Component
-const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+function ProtectedRoute({ children }) {
+  const { isAuthenticated, loading } = useAuth()
+  if (loading) return <AuthLoadingScreen />
+  if (!isAuthenticated) return <Navigate to="/login" replace />
+  return children
+}
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-[#38BDF8] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+function RootRoute() {
+  const { isAuthenticated, loading } = useAuth()
+  if (loading) return <AuthLoadingScreen />
+  return <Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />
+}
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return children;
-};
-
-// Main App Layout
-const AppLayout = ({ children }) => {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-
+function NotFound() {
   return (
-    <div className="flex h-screen bg-gray-50">
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Navbar onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="flex-1 overflow-auto">
-          <div className="p-4 md:p-6">{children}</div>
-        </main>
+    <div className="flex h-screen items-center justify-center bg-[#F8FAFC]">
+      <div className="text-center">
+        <h1 className="text-6xl font-bold text-[#111827]">404</h1>
+        <p className="mt-2 text-muted-foreground">Page not found</p>
+        <Button className="mt-6" asChild>
+          <a href="/dashboard">Back to Dashboard</a>
+        </Button>
       </div>
     </div>
-  );
-};
+  )
+}
 
-// Root Route Handler Component
-const RootRoute = () => {
-  const { isAuthenticated, loading } = useAuth();
+const protectedPage = (Page) => (
+  <ProtectedRoute>
+    <AppLayout>
+      <Page />
+    </AppLayout>
+  </ProtectedRoute>
+)
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-[#38BDF8] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  return <Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />;
-};
-
-const App = () => {
+export default function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <Toaster
-          position="top-right"
-          toastOptions={{
-            duration: 4000,
-            style: {
-              background: '#fff',
-              color: '#1F2937',
-            },
-          }}
-        />
-
-        <Routes>
-          {/* Root Route - Smart redirect based on auth status */}
-          <Route path="/" element={<RootRoute />} />
-
-          {/* Public Routes */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-
-          {/* Protected Routes */}
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <Dashboard />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/orders"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <Orders />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/orders/create"
-            element={
-              <ProtectedRoute>
-                <Navigate to="/orders" replace />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/users"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <Users />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/services"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <Services />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/items-categories"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <ItemsCategories />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/customers"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <Customers />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/staff"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <Staff />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/payments"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <Payments />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/pickup-delivery"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <PickupDelivery />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/inventory"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <Inventory />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/reports"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <Reports />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/notifications"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <Notifications />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <AppLayout>
-                  <Settings />
-                </AppLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* 404 Route */}
-          <Route
-            path="*"
-            element={
-              <div className="flex items-center justify-center h-screen">
-                <div className="text-center">
-                  <h1 className="text-4xl font-bold text-gray-900 mb-2">404</h1>
-                  <p className="text-gray-600 mb-4">Page not found</p>
-                  <a
-                    href="/dashboard"
-                    className="inline-block px-4 py-2 bg-[#38BDF8] text-white rounded-lg hover:bg-[#1E3A8A] transition-colors"
-                  >
-                    Back to Dashboard
-                  </a>
-                </div>
-              </div>
-            }
-          />
-        </Routes>
-      </AuthProvider>
+      <ThemeProvider defaultTheme="light" storageKey="laundryhub-theme">
+        <AuthProvider>
+          <Toaster position="top-right" richColors closeButton />
+          <Routes>
+            <Route path="/" element={<RootRoute />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/dashboard" element={protectedPage(Dashboard)} />
+            <Route path="/orders" element={protectedPage(Orders)} />
+            <Route path="/orders/create" element={<ProtectedRoute><Navigate to="/orders" replace /></ProtectedRoute>} />
+            <Route path="/users" element={protectedPage(Users)} />
+            <Route path="/services" element={protectedPage(Services)} />
+            <Route path="/items-categories" element={protectedPage(ItemsCategories)} />
+            <Route path="/customers" element={protectedPage(Customers)} />
+            <Route path="/staff" element={protectedPage(Staff)} />
+            <Route path="/payments" element={protectedPage(Payments)} />
+            <Route path="/invoices" element={protectedPage(Invoices)} />
+            <Route path="/pickup-delivery" element={protectedPage(PickupDelivery)} />
+            <Route path="/inventory" element={protectedPage(Inventory)} />
+            <Route path="/reports" element={protectedPage(Reports)} />
+            <Route path="/notifications" element={protectedPage(Notifications)} />
+            <Route path="/settings" element={protectedPage(Settings)} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
-  );
-};
-
-export default App;
+  )
+}

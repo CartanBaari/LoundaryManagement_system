@@ -1,302 +1,229 @@
-import { useEffect, useMemo, useState } from 'react';
-import { CreditCard, Search, Banknote, Receipt, BadgeDollarSign, Wallet, X } from 'lucide-react';
-import toast from 'react-hot-toast';
-import FeatureWorkspace from '../components/common/FeatureWorkspace';
-import { orderAPI, paymentAPI, userAPI } from '../services/api';
-import { useAuth } from '../context/AuthContext';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/common/Card';
-import { Button } from '../components/common/Button';
+import { useEffect, useMemo, useState } from "react"
+import { CreditCard, Plus, Wallet, TrendingUp, Receipt } from "lucide-react"
+import { toast } from "sonner"
+import { orderAPI, paymentAPI, userAPI } from "@/services/api"
+import { useAuth } from "@/context/AuthContext"
+import PageHeader from "@/components/shared/PageHeader"
+import DataTable from "@/components/shared/DataTable"
+import StatCard from "@/components/shared/StatCard"
+import { PaymentStatusBadge } from "@/components/shared/StatusBadge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { formatCurrency, formatDate } from "@/lib/utils"
 
 const initialFormState = {
-  clientId: '',
-  orderId: '',
-  customerName: '',
-  phoneNumber: '',
-  totalAmount: '',
-  amountPaid: '',
-  discount: '',
-  paymentMethod: 'cash',
-  paymentDate: new Date().toISOString().split('T')[0],
-  dueDate: '',
-  notes: '',
-};
+  clientId: "",
+  orderId: "",
+  customerName: "",
+  phoneNumber: "",
+  totalAmount: "",
+  amountPaid: "",
+  discount: "",
+  paymentMethod: "cash",
+  paymentDate: new Date().toISOString().split("T")[0],
+  dueDate: "",
+  notes: "",
+}
 
 const toSafeNumber = (value, fallback = 0) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const formatCurrency = (amount = 0) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 2,
-  }).format(amount);
-
-const formatDate = (dateValue) => {
-  if (!dateValue) {
-    return 'N/A';
-  }
-
-  return new Date(dateValue).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
-};
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
 
 const methodLabelMap = {
-  cash: 'Cash',
-  mobile_money: 'Mobile Money (Hormuud / EVC Plus)',
-  bank: 'Bank',
-};
+  cash: "Cash",
+  mobile_money: "Mobile Money",
+  bank: "Bank",
+}
 
-const statusStyleMap = {
-  paid: 'bg-emerald-100 text-emerald-700',
-  partial: 'bg-amber-100 text-amber-700',
-  unpaid: 'bg-rose-100 text-rose-700',
-};
+const statusLabelMap = { paid: "Paid", partial: "Partial", unpaid: "Unpaid" }
 
-const statusLabelMap = {
-  paid: 'Paid',
-  partial: 'Partial',
-  unpaid: 'Unpaid',
-};
-
-const Payments = () => {
-  const { user } = useAuth();
-  const [payments, setPayments] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [clients, setClients] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [showRecordModal, setShowRecordModal] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [formData, setFormData] = useState(initialFormState);
-  const isAdmin = user?.role === 'admin';
+export default function Payments() {
+  const { user } = useAuth()
+  const [payments, setPayments] = useState([])
+  const [orders, setOrders] = useState([])
+  const [clients, setClients] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [showRecordModal, setShowRecordModal] = useState(false)
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [formData, setFormData] = useState(initialFormState)
+  const isAdmin = user?.role === "admin"
 
   const loadPaymentsPageData = async () => {
-    setLoading(true);
-
+    setLoading(true)
     try {
       const [paymentsResponse, ordersResponse, clientsResponse] = await Promise.all([
         paymentAPI.getAll(),
         orderAPI.getAll(),
-        userAPI.getAll({ role: 'client' }),
-      ]);
-
-      setPayments(paymentsResponse.data?.payments || []);
-      setOrders((ordersResponse.data?.orders || []).filter((order) => order.userModel === 'Client'));
-      setClients(clientsResponse.data?.users || []);
+        userAPI.getAll({ role: "client" }),
+      ])
+      setPayments(paymentsResponse.data?.payments || [])
+      setOrders((ordersResponse.data?.orders || []).filter((order) => order.userModel === "Client"))
+      setClients(clientsResponse.data?.users || [])
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to load payments data');
+      toast.error(error.response?.data?.message || "Failed to load payments data")
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   useEffect(() => {
-    if (!user) {
-      return;
-    }
-
-    loadPaymentsPageData();
-  }, [user]);
+    if (user) loadPaymentsPageData()
+  }, [user])
 
   const filteredOrders = useMemo(() => {
-    if (!formData.clientId) {
-      return orders;
-    }
-
-    return orders.filter((order) => order.userId?._id === formData.clientId);
-  }, [orders, formData.clientId]);
+    if (!formData.clientId) return orders
+    return orders.filter((order) => order.userId?._id === formData.clientId)
+  }, [orders, formData.clientId])
 
   const selectedOrder = useMemo(
     () => orders.find((order) => order._id === formData.orderId) || null,
     [orders, formData.orderId]
-  );
+  )
 
   const computedRemaining = useMemo(() => {
-    const totalAmount = Math.max(0, toSafeNumber(formData.totalAmount, selectedOrder?.totalAmount || 0));
-    const amountPaid = Math.max(0, toSafeNumber(formData.amountPaid, 0));
-    const discount = Math.max(0, toSafeNumber(formData.discount, 0));
-    return Math.max(0, totalAmount - amountPaid - discount);
-  }, [formData.totalAmount, formData.amountPaid, formData.discount, selectedOrder?.totalAmount]);
+    const totalAmount = Math.max(0, toSafeNumber(formData.totalAmount, selectedOrder?.totalAmount || 0))
+    const amountPaid = Math.max(0, toSafeNumber(formData.amountPaid, 0))
+    const discount = Math.max(0, toSafeNumber(formData.discount, 0))
+    return Math.max(0, totalAmount - amountPaid - discount)
+  }, [formData.totalAmount, formData.amountPaid, formData.discount, selectedOrder?.totalAmount])
 
   const computedStatus = useMemo(() => {
-    const amountPaid = Math.max(0, toSafeNumber(formData.amountPaid, 0));
-
-    if (amountPaid <= 0) {
-      return 'unpaid';
-    }
-
-    if (computedRemaining <= 0) {
-      return 'paid';
-    }
-
-    return 'partial';
-  }, [computedRemaining, formData.amountPaid]);
+    const amountPaid = Math.max(0, toSafeNumber(formData.amountPaid, 0))
+    if (amountPaid <= 0) return "unpaid"
+    if (computedRemaining <= 0) return "paid"
+    return "partial"
+  }, [computedRemaining, formData.amountPaid])
 
   const filteredPayments = useMemo(() => {
-    if (!searchTerm.trim()) {
-      return payments;
-    }
-
-    const lowerSearch = searchTerm.toLowerCase();
-    return payments.filter((payment) => {
-      const orderNumber = payment.orderId?.orderNumber || '';
-      const methodLabel = methodLabelMap[payment.paymentMethod] || payment.paymentMethod || '';
-
-      return [payment.paymentId, payment.customerName, payment.phoneNumber, orderNumber, methodLabel]
-        .join(' ')
-        .toLowerCase()
-        .includes(lowerSearch);
-    });
-  }, [payments, searchTerm]);
+    let filtered = payments
+    if (statusFilter === "paid") filtered = filtered.filter((p) => p.status === "paid")
+    else if (statusFilter === "pending") filtered = filtered.filter((p) => p.status === "partial")
+    else if (statusFilter === "unpaid") filtered = filtered.filter((p) => p.status === "unpaid")
+    return filtered
+  }, [payments, statusFilter])
 
   const paymentRows = useMemo(
     () =>
       filteredPayments.map((payment) => ({
         id: payment._id,
         paymentId: payment.paymentId,
-        orderId: payment.orderId?.orderNumber || 'N/A',
-        customer: payment.customerName || payment.clientId?.name || 'N/A',
-        method: methodLabelMap[payment.paymentMethod] || payment.paymentMethod || 'N/A',
-        amountPaid: formatCurrency(payment.amountPaid || 0),
-        remainingBalance: formatCurrency(payment.remainingBalance || 0),
-        status: payment.status || 'unpaid',
-        paymentDate: formatDate(payment.paymentDate),
+        orderId: payment.orderId?.orderNumber || "N/A",
+        customer: payment.customerName || payment.clientId?.name || "N/A",
+        method: methodLabelMap[payment.paymentMethod] || payment.paymentMethod || "N/A",
+        amountPaid: payment.amountPaid || 0,
+        remainingBalance: payment.remainingBalance || 0,
+        status: payment.status || "unpaid",
+        paymentDate: payment.paymentDate,
       })),
     [filteredPayments]
-  );
+  )
 
   const todayCollected = useMemo(() => {
-    const todayDateString = new Date().toDateString();
+    const todayDateString = new Date().toDateString()
     return payments
-      .filter((payment) => new Date(payment.paymentDate).toDateString() === todayDateString)
-      .reduce((sum, payment) => sum + toSafeNumber(payment.amountPaid, 0), 0);
-  }, [payments]);
+      .filter((p) => new Date(p.paymentDate).toDateString() === todayDateString)
+      .reduce((sum, p) => sum + toSafeNumber(p.amountPaid, 0), 0)
+  }, [payments])
 
   const totalOutstanding = useMemo(
-    () => payments.reduce((sum, payment) => sum + toSafeNumber(payment.remainingBalance, 0), 0),
+    () => payments.reduce((sum, p) => sum + toSafeNumber(p.remainingBalance, 0), 0),
     [payments]
-  );
+  )
 
   const successRate = useMemo(() => {
-    if (!payments.length) {
-      return 0;
-    }
-
-    const paidCount = payments.filter((payment) => payment.status === 'paid').length;
-    return Math.round((paidCount / payments.length) * 100);
-  }, [payments]);
-
-  const settlementMix = useMemo(() => {
-    const counts = payments.reduce(
-      (acc, payment) => {
-        const key = payment.paymentMethod || 'cash';
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-      },
-      { cash: 0, mobile_money: 0, bank: 0 }
-    );
-
-    const totalCount = payments.length || 1;
-
-    return [
-      { key: 'mobile_money', label: 'Mobile Money', percentage: Math.round((counts.mobile_money / totalCount) * 100) },
-      { key: 'cash', label: 'Cash', percentage: Math.round((counts.cash / totalCount) * 100) },
-      { key: 'bank', label: 'Bank', percentage: Math.round((counts.bank / totalCount) * 100) },
-    ];
-  }, [payments]);
+    if (!payments.length) return 0
+    const paidCount = payments.filter((p) => p.status === "paid").length
+    return Math.round((paidCount / payments.length) * 100)
+  }, [payments])
 
   const resetForm = () => {
-    setFormData({
-      ...initialFormState,
-      paymentDate: new Date().toISOString().split('T')[0],
-    });
-  };
+    setFormData({ ...initialFormState, paymentDate: new Date().toISOString().split("T")[0] })
+  }
 
   const closeModal = () => {
-    setShowRecordModal(false);
-    resetForm();
-  };
+    setShowRecordModal(false)
+    resetForm()
+  }
 
   const openModal = () => {
     if (!isAdmin) {
-      toast.error('Only admins can record payments');
-      return;
+      toast.error("Only admins can record payments")
+      return
     }
+    setShowRecordModal(true)
+    resetForm()
+  }
 
-    setShowRecordModal(true);
-    resetForm();
-  };
+  const handleInputChange = (name, value) => {
+    setFormData((prev) => ({ ...prev, [name]: value }))
+  }
 
-  const handleInputChange = (event) => {
-    const { name, value } = event.target;
-    setFormData((previous) => ({
-      ...previous,
-      [name]: value,
-    }));
-  };
-
-  const handleClientSelect = (event) => {
-    const selectedClientId = event.target.value;
-    const selectedClient = clients.find((client) => client._id === selectedClientId);
-
-    setFormData((previous) => ({
-      ...previous,
+  const handleClientSelect = (selectedClientId) => {
+    const selectedClient = clients.find((c) => c._id === selectedClientId)
+    setFormData((prev) => ({
+      ...prev,
       clientId: selectedClientId,
-      orderId: '',
-      customerName: selectedClient?.name || '',
-      phoneNumber: selectedClient?.phone || '',
-      totalAmount: '',
-      amountPaid: '',
-      discount: '',
-      dueDate: '',
-      notes: '',
-    }));
-  };
+      orderId: "",
+      customerName: selectedClient?.name || "",
+      phoneNumber: selectedClient?.phone || "",
+      totalAmount: "",
+      amountPaid: "",
+      discount: "",
+      dueDate: "",
+      notes: "",
+    }))
+  }
 
-  const handleOrderSelect = (event) => {
-    const selectedOrderId = event.target.value;
-    const order = orders.find((entry) => entry._id === selectedOrderId);
-
+  const handleOrderSelect = (selectedOrderId) => {
+    const order = orders.find((e) => e._id === selectedOrderId)
     if (!order) {
-      setFormData((previous) => ({
-        ...previous,
-        orderId: '',
-      }));
-      return;
+      setFormData((prev) => ({ ...prev, orderId: "" }))
+      return
     }
-
-    setFormData((previous) => ({
-      ...previous,
+    setFormData((prev) => ({
+      ...prev,
       orderId: selectedOrderId,
-      clientId: order.userId?._id || previous.clientId,
-      customerName: order.userId?.name || previous.customerName,
-      phoneNumber: order.userId?.phone || previous.phoneNumber,
+      clientId: order.userId?._id || prev.clientId,
+      customerName: order.userId?.name || prev.customerName,
+      phoneNumber: order.userId?.phone || prev.phoneNumber,
       totalAmount: String(toSafeNumber(order.totalAmount, 0)),
-      amountPaid: previous.amountPaid || '',
-      discount: previous.discount || '',
-    }));
-  };
+      amountPaid: prev.amountPaid || "",
+      discount: prev.discount || "",
+    }))
+  }
 
-  const handleSubmitPayment = async (event) => {
-    event.preventDefault();
-
+  const handleSubmitPayment = async (e) => {
+    e.preventDefault()
     if (!formData.orderId) {
-      toast.error('Please select an order');
-      return;
+      toast.error("Please select an order")
+      return
     }
-
     if (!formData.clientId) {
-      toast.error('Please select a client');
-      return;
+      toast.error("Please select a client")
+      return
     }
-
-    setSubmitting(true);
-
+    setSubmitting(true)
     try {
       const payload = {
         clientId: formData.clientId,
@@ -311,382 +238,248 @@ const Payments = () => {
         dueDate: formData.dueDate || undefined,
         status: computedStatus,
         notes: formData.notes.trim(),
-      };
-
-      const response = await paymentAPI.create(payload);
-      toast.success(`Payment recorded (${response.data?.payment?.paymentId || 'Saved'})`);
-      closeModal();
-      await loadPaymentsPageData();
+      }
+      const response = await paymentAPI.create(payload)
+      toast.success(`Payment recorded (${response.data?.payment?.paymentId || "Saved"})`)
+      closeModal()
+      await loadPaymentsPageData()
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to record payment');
+      toast.error(error.response?.data?.message || "Failed to record payment")
     } finally {
-      setSubmitting(false);
+      setSubmitting(false)
     }
-  };
+  }
+
+  const columns = useMemo(
+    () => [
+      {
+        accessorKey: "paymentId",
+        header: "Payment ID",
+        cell: ({ row }) => <span className="font-semibold">{row.original.paymentId}</span>,
+      },
+      { accessorKey: "orderId", header: "Order ID" },
+      { accessorKey: "customer", header: "Customer" },
+      {
+        accessorKey: "method",
+        header: "Method",
+        cell: ({ row }) => <Badge variant="outline">{row.original.method}</Badge>,
+      },
+      {
+        accessorKey: "amountPaid",
+        header: "Amount Paid",
+        cell: ({ row }) => formatCurrency(row.original.amountPaid),
+      },
+      {
+        accessorKey: "remainingBalance",
+        header: "Remaining",
+        cell: ({ row }) => formatCurrency(row.original.remainingBalance),
+      },
+      {
+        accessorKey: "paymentDate",
+        header: "Date",
+        cell: ({ row }) => formatDate(row.original.paymentDate),
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) => (
+          <PaymentStatusBadge status={statusLabelMap[row.original.status] || row.original.status} />
+        ),
+      },
+    ],
+    []
+  )
 
   return (
-    <>
-      <FeatureWorkspace
-        eyebrow="Revenue Desk"
+    <div className="space-y-8">
+      <PageHeader
         title="Payments"
-        description="Review collections, invoice status, and settlement methods in a layout consistent with the rest of your dashboard."
-        tone="amber"
-        actions={[
-          {
-            label: 'Export Payments',
-            icon: Receipt,
-            onClick: () => toast.success('Payment export can be connected next'),
-            className: 'rounded-2xl border-0 bg-amber-100/80 px-5 py-3 text-slate-800 hover:bg-amber-100',
-          },
-          isAdmin
-            ? {
-                label: 'Record Payment',
-                icon: BadgeDollarSign,
-                variant: 'primary',
-                onClick: openModal,
-                className: 'rounded-2xl bg-[#3a2fd0] px-6 py-3 hover:bg-[#2f26af]',
-              }
-            : null,
-        ].filter(Boolean)}
-        stats={[
-          {
-            label: 'Collected Today',
-            value: formatCurrency(todayCollected),
-            badge: 'Live',
-            icon: Wallet,
-            tone: 'amber',
-            helper: 'Total collected in today’s payments',
-          },
-          {
-            label: 'Outstanding',
-            value: formatCurrency(totalOutstanding),
-            badge: totalOutstanding > 0 ? 'Attention' : 'Clear',
-            icon: CreditCard,
-            tone: 'rose',
-            helper: 'Remaining balances from recorded payments',
-          },
-          {
-            label: 'Payment Success',
-            value: `${successRate}%`,
-            badge: payments.length ? 'Live' : 'No Data',
-            icon: Banknote,
-            tone: 'emerald',
-            helper: 'Share of fully paid transactions',
-          },
-        ]}
-        filters={[
-          {
-            label: 'search',
-            icon: Search,
-            content: (
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder="Search payment ID, order ID, method, or customer..."
-                className="w-full min-w-[240px] bg-transparent text-sm text-slate-600 focus:outline-none"
-              />
-            ),
-          },
-        ]}
-        tableTitle="Payment Activity"
-        tableDescription={
-          loading ? 'Loading payments...' : `Monitor payment status and revenue collection performance. (${paymentRows.length} records)`
+        description="Review collections, invoice status, and settlement methods."
+        icon={CreditCard}
+        action={
+          isAdmin ? (
+            <Button onClick={openModal}>
+              <Plus className="mr-2 h-4 w-4" />Record Payment
+            </Button>
+          ) : null
         }
-        columns={[
-          { key: 'paymentId', label: 'Payment ID' },
-          { key: 'orderId', label: 'Order ID' },
-          { key: 'customer', label: 'Customer' },
-          { key: 'method', label: 'Method' },
-          { key: 'amountPaid', label: 'Amount Paid' },
-          { key: 'remainingBalance', label: 'Remaining' },
-          { key: 'paymentDate', label: 'Payment Date' },
-          {
-            key: 'status',
-            label: 'Status',
-            render: (value) => (
-              <span className={`rounded-full px-3 py-1 text-sm font-medium ${statusStyleMap[value] || statusStyleMap.unpaid}`}>
-                {statusLabelMap[value] || value}
-              </span>
-            ),
-          },
-        ]}
-        rows={paymentRows}
-        sidePanels={[
-          {
-            title: 'Collection Alerts',
-            description: 'Important payment signals from current records.',
-            content: (
-              <div className="space-y-4">
-                <div className="rounded-2xl bg-[#fffaf1] p-4 text-slate-700">
-                  {paymentRows.filter((row) => row.status !== 'paid').length} payments are still partial or unpaid.
-                </div>
-                <div className="rounded-2xl bg-[#fffaf1] p-4 text-slate-700">
-                  Outstanding balance currently stands at {formatCurrency(totalOutstanding)}.
-                </div>
-                <div className="rounded-2xl bg-[#fffaf1] p-4 text-slate-700">
-                  Total recorded payments: {payments.length}.
-                </div>
-              </div>
-            ),
-          },
-          {
-            title: 'Settlement Mix',
-            description: 'Payment method distribution.',
-            content: (
-              <div className="space-y-4">
-                {settlementMix.map((item) => (
-                  <div key={item.key} className="rounded-2xl bg-[#fafaff] p-4 text-slate-700">
-                    {item.label} {item.percentage}%
-                  </div>
-                ))}
-              </div>
-            ),
-          },
-        ]}
       />
 
-      {showRecordModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <Card className="max-h-[95vh] w-full max-w-4xl overflow-y-auto">
-            <CardHeader>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <CardTitle>Record Payment</CardTitle>
-                  <CardDescription>
-                    Create a payment record with client details, order reference, and settlement status.
-                  </CardDescription>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="Collected Today" value={formatCurrency(todayCollected)} icon={Wallet} loading={loading} />
+        <StatCard label="Outstanding" value={formatCurrency(totalOutstanding)} icon={CreditCard} loading={loading} />
+        <StatCard label="Success Rate" value={`${successRate}%`} icon={TrendingUp} loading={loading} />
+      </div>
+
+      <Tabs value={statusFilter} onValueChange={setStatusFilter}>
+        <TabsList>
+          <TabsTrigger value="all">All</TabsTrigger>
+          <TabsTrigger value="paid">Paid</TabsTrigger>
+          <TabsTrigger value="pending">Partial</TabsTrigger>
+          <TabsTrigger value="unpaid">Unpaid</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      <DataTable
+        columns={columns}
+        data={paymentRows}
+        searchKey="customer"
+        searchPlaceholder="Search payments..."
+        loading={loading}
+        emptyTitle="No payments found"
+        emptyDescription="Record a payment to get started."
+      />
+
+      <Dialog open={showRecordModal} onOpenChange={closeModal}>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Record Payment</DialogTitle>
+            <DialogDescription>
+              Create a payment record with client details and settlement status.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmitPayment} className="space-y-6">
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold">Basic Information</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Client</Label>
+                  <Select value={formData.clientId} onValueChange={handleClientSelect}>
+                    <SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger>
+                    <SelectContent>
+                      {clients.map((client) => (
+                        <SelectItem key={client._id} value={client._id}>{client.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100"
-                >
-                  <X size={18} />
-                </button>
+                <div className="space-y-2">
+                  <Label>Order</Label>
+                  <Select value={formData.orderId} onValueChange={handleOrderSelect}>
+                    <SelectTrigger><SelectValue placeholder="Select order" /></SelectTrigger>
+                    <SelectContent>
+                      {filteredOrders.map((order) => (
+                        <SelectItem key={order._id} value={order._id}>
+                          {order.orderNumber} ({formatCurrency(order.totalAmount || 0)})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Customer Name</Label>
+                  <Input
+                    value={formData.customerName}
+                    onChange={(e) => handleInputChange("customerName", e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Phone Number</Label>
+                  <Input
+                    value={formData.phoneNumber}
+                    onChange={(e) => handleInputChange("phoneNumber", e.target.value)}
+                  />
+                </div>
               </div>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmitPayment} className="space-y-6">
-                <div className="rounded-xl border border-gray-200 p-4">
-                  <h3 className="mb-4 text-lg font-semibold text-gray-900">Basic Information</h3>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Payment ID</label>
-                      <input
-                        value="Auto-generated on save"
-                        readOnly
-                        className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2 text-gray-500"
-                      />
-                    </div>
+            </div>
 
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Client</label>
-                      <select
-                        name="clientId"
-                        value={formData.clientId}
-                        onChange={handleClientSelect}
-                        className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                        required
-                      >
-                        <option value="">Select client</option>
-                        {clients.map((client) => (
-                          <option key={client._id} value={client._id}>
-                            {client.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Order ID</label>
-                      <select
-                        name="orderId"
-                        value={formData.orderId}
-                        onChange={handleOrderSelect}
-                        className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                        required
-                      >
-                        <option value="">Select order</option>
-                        {filteredOrders.map((order) => (
-                          <option key={order._id} value={order._id}>
-                            {order.orderNumber} ({formatCurrency(order.totalAmount || 0)})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Customer Name</label>
-                      <input
-                        name="customerName"
-                        value={formData.customerName}
-                        onChange={handleInputChange}
-                        className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                        placeholder="Customer full name"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Phone Number</label>
-                      <input
-                        name="phoneNumber"
-                        value={formData.phoneNumber}
-                        onChange={handleInputChange}
-                        className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                        placeholder="Customer phone"
-                      />
-                    </div>
-                  </div>
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold">Payment Details</h3>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Total Amount</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.totalAmount}
+                    onChange={(e) => handleInputChange("totalAmount", e.target.value)}
+                    required
+                  />
                 </div>
-
-                <div className="rounded-xl border border-gray-200 p-4">
-                  <h3 className="mb-4 text-lg font-semibold text-gray-900">Payment Details</h3>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Total Amount</label>
-                      <input
-                        name="totalAmount"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={formData.totalAmount}
-                        onChange={handleInputChange}
-                        className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                        placeholder="0.00"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Amount Paid</label>
-                      <input
-                        name="amountPaid"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={formData.amountPaid}
-                        onChange={handleInputChange}
-                        className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                        placeholder="0.00"
-                        required
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Discount</label>
-                      <input
-                        name="discount"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={formData.discount}
-                        onChange={handleInputChange}
-                        className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                        placeholder="0.00"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Remaining Balance</label>
-                      <input
-                        type="number"
-                        value={computedRemaining.toFixed(2)}
-                        readOnly
-                        className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2 text-gray-500"
-                      />
-                    </div>
-                  </div>
+                <div className="space-y-2">
+                  <Label>Amount Paid</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.amountPaid}
+                    onChange={(e) => handleInputChange("amountPaid", e.target.value)}
+                    required
+                  />
                 </div>
-
-                <div className="rounded-xl border border-gray-200 p-4">
-                  <h3 className="mb-4 text-lg font-semibold text-gray-900">Payment Method</h3>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Method</label>
-                      <select
-                        name="paymentMethod"
-                        value={formData.paymentMethod}
-                        onChange={handleInputChange}
-                        className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                        required
-                      >
-                        <option value="cash">Cash</option>
-                        <option value="mobile_money">Mobile Money (Hormuud / EVC Plus)</option>
-                        <option value="bank">Bank</option>
-                      </select>
-                    </div>
-                  </div>
+                <div className="space-y-2">
+                  <Label>Discount</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.discount}
+                    onChange={(e) => handleInputChange("discount", e.target.value)}
+                  />
                 </div>
-
-                <div className="rounded-xl border border-gray-200 p-4">
-                  <h3 className="mb-4 text-lg font-semibold text-gray-900">Dates</h3>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Payment Date</label>
-                      <input
-                        name="paymentDate"
-                        type="date"
-                        value={formData.paymentDate}
-                        onChange={handleInputChange}
-                        className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Due Date (if debt)</label>
-                      <input
-                        name="dueDate"
-                        type="date"
-                        value={formData.dueDate}
-                        onChange={handleInputChange}
-                        className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                      />
-                    </div>
-                  </div>
+                <div className="space-y-2">
+                  <Label>Remaining Balance</Label>
+                  <Input value={computedRemaining.toFixed(2)} readOnly className="bg-muted" />
                 </div>
+              </div>
+            </div>
 
-                <div className="rounded-xl border border-gray-200 p-4">
-                  <h3 className="mb-4 text-lg font-semibold text-gray-900">Extra</h3>
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Status</label>
-                      <input
-                        value={statusLabelMap[computedStatus]}
-                        readOnly
-                        className={`w-full rounded-lg border px-4 py-2 ${statusStyleMap[computedStatus]}`}
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700">Notes</label>
-                      <textarea
-                        name="notes"
-                        value={formData.notes}
-                        onChange={handleInputChange}
-                        rows={3}
-                        className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-                        placeholder="Optional details..."
-                      />
-                    </div>
-                  </div>
-                </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Payment Method</Label>
+                <Select value={formData.paymentMethod} onValueChange={(v) => handleInputChange("paymentMethod", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="mobile_money">Mobile Money (Hormuud / EVC Plus)</SelectItem>
+                    <SelectItem value="bank">Bank</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Input value={statusLabelMap[computedStatus]} readOnly className="bg-muted" />
+              </div>
+              <div className="space-y-2">
+                <Label>Payment Date</Label>
+                <Input
+                  type="date"
+                  value={formData.paymentDate}
+                  onChange={(e) => handleInputChange("paymentDate", e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Due Date (if debt)</Label>
+                <Input
+                  type="date"
+                  value={formData.dueDate}
+                  onChange={(e) => handleInputChange("dueDate", e.target.value)}
+                />
+              </div>
+            </div>
 
-                <div className="flex flex-col gap-3 pt-2 md:flex-row">
-                  <Button type="submit" variant="primary" className="md:flex-1" disabled={submitting}>
-                    {submitting ? 'Recording...' : 'Record Payment'}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={closeModal} className="md:flex-1">
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-    </>
-  );
-};
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea
+                value={formData.notes}
+                onChange={(e) => handleInputChange("notes", e.target.value)}
+                rows={3}
+                placeholder="Optional details..."
+              />
+            </div>
 
-export default Payments;
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeModal}>Cancel</Button>
+              <Button type="submit" loading={submitting}>
+                <Receipt className="mr-2 h-4 w-4" />Record Payment
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}

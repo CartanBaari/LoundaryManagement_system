@@ -1,716 +1,800 @@
-import { useEffect, useState } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { useOrders } from '../hooks/useOrders';
-import { useNotifications } from '../hooks/useNotifications';
-import NewOrder from './NewOrder';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/common/Card';
-import { Table, TableHead, TableBody, TableRow, TableHeader, TableCell } from '../components/common/Table';
-import { Button } from '../components/common/Button';
-import Badge from '../components/common/Badge';
-import { Plus, Search, Filter, Eye, Edit2, Trash2, UserCheck, X, MessageSquare, Send } from 'lucide-react';
-import toast from 'react-hot-toast';
-import { userAPI } from '../services/api';
+import { useEffect, useMemo, useState } from "react"
+import {
+  Plus,
+  ShoppingCart,
+  Send,
+  MessageSquare,
+  Eye,
+  Edit2,
+  Trash2,
+  UserCheck,
+  MoreHorizontal,
+  FileText,
+  Printer,
+} from "lucide-react"
+import { toast } from "sonner"
+import { useAuth } from "@/context/AuthContext"
+import { useOrders } from "@/hooks/useOrders"
+import { useNotifications } from "@/hooks/useNotifications"
+import NewOrder from "./NewOrder"
+import { userAPI } from "@/services/api"
+import PageHeader from "@/components/shared/PageHeader"
+import DataTable from "@/components/shared/DataTable"
+import StatusBadge, { PaymentStatusBadge } from "@/components/shared/StatusBadge"
+import OrderTimeline from "@/components/shared/OrderTimeline"
+import StatCard from "@/components/shared/StatCard"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Separator } from "@/components/ui/separator"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { formatCurrency, formatDate, formatStaffWorkloadLabel, toDateInputValue, isStaffAtCapacity } from "@/lib/utils"
 
-const Orders = () => {
-  const { user } = useAuth();
-  const { orders, fetchOrders, updateOrder, deleteOrder, loading } = useOrders();
-  const { sendBroadcast, sendDirect } = useNotifications();
-  const [filteredOrders, setFilteredOrders] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const [editingOrder, setEditingOrder] = useState(null);
-  const [assigningOrder, setAssigningOrder] = useState(null);
-  const [staffMembers, setStaffMembers] = useState([]);
-  const [customers, setCustomers] = useState([]);
+const UNASSIGNED_STAFF_VALUE = "unassigned"
+
+const STATUS_TABS = [
+  { value: "all", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "processing", label: "Processing" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+]
+
+const PROCESSING_STATUSES = ["washing", "drying", "ready"]
+
+const formatItemTypes = (items = []) => {
+  if (!items.length) return "N/A"
+  const uniqueTypes = [
+    ...new Set(items.map((item) => item.serviceName || item.itemType || "Other").filter(Boolean)),
+  ]
+  return uniqueTypes.join(", ")
+}
+
+export default function Orders() {
+  const { user } = useAuth()
+  const { orders, fetchOrders, updateOrder, deleteOrder, loading } = useOrders()
+  const { sendBroadcast, sendDirect } = useNotifications()
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [showCreateOrderModal, setShowCreateOrderModal] = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState(null)
+  const [editingOrder, setEditingOrder] = useState(null)
+  const [assigningOrder, setAssigningOrder] = useState(null)
+  const [deleteOrderId, setDeleteOrderId] = useState(null)
+  const [staffMembers, setStaffMembers] = useState([])
+  const [customers, setCustomers] = useState([])
   const [editFormData, setEditFormData] = useState({
-    status: 'pending',
-    deliveryNotes: '',
-  });
-  const [messageModal, setMessageModal] = useState(null);
-  const [messageText, setMessageText] = useState('');
-  const [selectedCustomerId, setSelectedCustomerId] = useState('');
-  const [assignStaffId, setAssignStaffId] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const isAdmin = user?.role === 'admin';
+    status: "pending",
+    deliveryNotes: "",
+    paymentStatus: "pending",
+  })
+  const [messageModal, setMessageModal] = useState(null)
+  const [messageText, setMessageText] = useState("")
+  const [selectedCustomerId, setSelectedCustomerId] = useState("")
+  const [assignStaffId, setAssignStaffId] = useState(UNASSIGNED_STAFF_VALUE)
+  const [staffWorkloads, setStaffWorkloads] = useState([])
+  const [loadingWorkloads, setLoadingWorkloads] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+
+  const isAdmin = user?.role === "admin"
+  const canEditOrders = user?.role === "admin" || user?.role === "staff" || user?.role === "client"
+  const canDeleteOrders = user?.role === "admin"
+  const canManageStatus = user?.role === "admin" || user?.role === "staff"
 
   useEffect(() => {
     const loadOrders = async () => {
       try {
-        const params = {};
-        if (user?.role === 'client') {
-          params.userId = user._id;
-        }
-        await fetchOrders(params);
-      } catch (error) {
-        toast.error('Failed to load orders');
+        const params = {}
+        if (user?.role === "client") params.userId = user._id
+        await fetchOrders(params)
+      } catch {
+        toast.error("Failed to load orders")
       }
-    };
-
-    if (user) {
-      loadOrders();
     }
-  }, [user, fetchOrders]);
+    if (user) loadOrders()
+  }, [user, fetchOrders])
 
   useEffect(() => {
     const loadStaffMembers = async () => {
       if (!isAdmin) {
-        setStaffMembers([]);
-        setCustomers([]);
-        return;
+        setStaffMembers([])
+        setCustomers([])
+        return
       }
-
       try {
         const [staffResponse, customersResponse] = await Promise.all([
           userAPI.getStaff(),
-          userAPI.getAll({ role: 'client' }),
-        ]);
-        setStaffMembers(staffResponse.data?.staffMembers || []);
-        setCustomers(customersResponse.data?.users || []);
-      } catch (error) {
-        toast.error('Failed to load messaging and staff data');
+          userAPI.getAll({ role: "client" }),
+        ])
+        setStaffMembers(staffResponse.data?.staffMembers || [])
+        setCustomers(customersResponse.data?.users || [])
+      } catch {
+        toast.error("Failed to load messaging and staff data")
       }
-    };
-
-    loadStaffMembers();
-  }, [isAdmin]);
-
-  useEffect(() => {
-    let filtered = orders;
-
-    if (searchTerm) {
-      filtered = filtered.filter(order =>
-        order.orderNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.userId?.name?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
     }
+    loadStaffMembers()
+  }, [isAdmin])
 
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(order => order.status === statusFilter);
+  const filteredOrders = useMemo(() => {
+    let filtered = orders
+    if (statusFilter === "pending") {
+      filtered = filtered.filter((o) => o.status === "pending")
+    } else if (statusFilter === "processing") {
+      filtered = filtered.filter((o) => PROCESSING_STATUSES.includes(o.status))
+    } else if (statusFilter === "completed") {
+      filtered = filtered.filter((o) => o.status === "delivered")
+    } else if (statusFilter === "cancelled") {
+      filtered = filtered.filter((o) => o.status === "cancelled")
     }
+    return filtered
+  }, [orders, statusFilter])
 
-    setFilteredOrders(filtered);
-  }, [orders, searchTerm, statusFilter]);
+  const stats = useMemo(() => {
+    const pending = orders.filter((o) => o.status === "pending").length
+    const processing = orders.filter((o) => PROCESSING_STATUSES.includes(o.status)).length
+    const completed = orders.filter((o) => o.status === "delivered").length
+    const cancelled = orders.filter((o) => o.status === "cancelled").length
+    return { total: orders.length, pending, processing, completed, cancelled }
+  }, [orders])
 
-  const getStatusColor = (status) => {
-    const statusColors = {
-      pending: 'yellow',
-      washing: 'blue',
-      drying: 'purple',
-      ready: 'green',
-      delivered: 'green',
-      cancelled: 'red',
-    };
-    return statusColors[status] || 'gray';
-  };
+  const getStaffWorkload = (staffId) =>
+    staffWorkloads.find((entry) => entry.staffId === String(staffId))
 
-  const formatDate = (date) => {
-    return new Date(date).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
-
-  const formatItemTypes = (items = []) => {
-    if (!items.length) {
-      return 'N/A';
-    }
-
-    const uniqueTypes = [
-      ...new Set(items.map((item) => item.serviceName || item.itemType || 'Other').filter(Boolean)),
-    ];
-    return uniqueTypes.join(', ');
-  };
-
-  const canEditOrders = user?.role === 'admin' || user?.role === 'staff' || user?.role === 'client';
-  const canDeleteOrders = user?.role === 'admin';
-  const canManageStatus = user?.role === 'admin' || user?.role === 'staff';
-
-  const openViewModal = (order) => {
-    setSelectedOrder(order);
-  };
+  const selectedStaffWorkload =
+    assignStaffId && assignStaffId !== UNASSIGNED_STAFF_VALUE
+      ? getStaffWorkload(assignStaffId)
+      : null
 
   const openEditModal = (order) => {
-    setEditingOrder(order);
+    setEditingOrder(order)
     setEditFormData({
-      status: order.status || 'pending',
-      deliveryNotes: order.deliveryNotes || '',
-    });
-  };
+      status: order.status || "pending",
+      deliveryNotes: order.deliveryNotes || "",
+      paymentStatus: order.paymentStatus || "pending",
+    })
+  }
 
-  const openAssignModal = (order) => {
-    setAssigningOrder(order);
-    setAssignStaffId(order.assignedStaff?._id || '');
-  };
+  const openAssignModal = async (order) => {
+    setAssigningOrder(order)
+    setAssignStaffId(order.assignedStaff?._id || UNASSIGNED_STAFF_VALUE)
+    setStaffWorkloads([])
+    setLoadingWorkloads(true)
+    try {
+      const pickupDate = order.pickupDate
+        ? toDateInputValue(order.pickupDate)
+        : toDateInputValue(new Date())
+      const response = await userAPI.getStaffWorkload({
+        date: pickupDate,
+        excludeOrderId: order._id,
+      })
+      setStaffWorkloads(response.data?.workloads || [])
+    } catch {
+      toast.error("Failed to load staff workload")
+    } finally {
+      setLoadingWorkloads(false)
+    }
+  }
 
   const closeModals = () => {
-    setSelectedOrder(null);
-    setEditingOrder(null);
-    setAssigningOrder(null);
-    setMessageModal(null);
-    setMessageText('');
-    setSelectedCustomerId('');
-    setEditFormData({
-      status: 'pending',
-      deliveryNotes: '',
-    });
-    setAssignStaffId('');
-  };
-
-  const handleEditInputChange = (e) => {
-    const { name, value } = e.target;
-    setEditFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
+    setEditingOrder(null)
+    setAssigningOrder(null)
+    setMessageModal(null)
+    setMessageText("")
+    setSelectedCustomerId("")
+    setEditFormData({ status: "pending", deliveryNotes: "", paymentStatus: "pending" })
+    setAssignStaffId(UNASSIGNED_STAFF_VALUE)
+    setStaffWorkloads([])
+  }
 
   const handleUpdateOrder = async (e) => {
-    e.preventDefault();
-
-    if (!editingOrder) {
-      return;
-    }
-
-    setSubmitting(true);
-
+    e.preventDefault()
+    if (!editingOrder) return
+    setSubmitting(true)
     try {
       const payload =
-        user?.role !== 'admin'
+        user?.role !== "admin"
           ? { deliveryNotes: editFormData.deliveryNotes }
           : {
               status: editFormData.status,
               deliveryNotes: editFormData.deliveryNotes,
-            };
-
-      await updateOrder(editingOrder._id, payload);
-      toast.success('Order updated successfully');
-      closeModals();
+              paymentStatus: editFormData.paymentStatus,
+            }
+      await updateOrder(editingOrder._id, payload)
+      toast.success("Order updated successfully")
+      closeModals()
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to update order');
+      toast.error(error.response?.data?.message || "Failed to update order")
     } finally {
-      setSubmitting(false);
+      setSubmitting(false)
     }
-  };
+  }
 
-  const handleDeleteOrder = async (orderId) => {
-    if (!window.confirm('Are you sure you want to delete this order?')) {
-      return;
-    }
-
+  const handleConfirmDelete = async () => {
+    if (!deleteOrderId) return
     try {
-      await deleteOrder(orderId);
-      toast.success('Order deleted successfully');
-      if (selectedOrder?._id === orderId) {
-        setSelectedOrder(null);
-      }
+      await deleteOrder(deleteOrderId)
+      toast.success("Order deleted successfully")
+      if (selectedOrder?._id === deleteOrderId) setSelectedOrder(null)
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to delete order');
+      toast.error(error.response?.data?.message || "Failed to delete order")
+    } finally {
+      setDeleteOrderId(null)
     }
-  };
+  }
 
   const handleAssignOrder = async (e) => {
-    e.preventDefault();
+    e.preventDefault()
+    if (!assigningOrder) return
 
-    if (!assigningOrder) {
-      return;
+    if (assignStaffId !== UNASSIGNED_STAFF_VALUE && isStaffAtCapacity(selectedStaffWorkload)) {
+      toast.error(
+        selectedStaffWorkload
+          ? `${selectedStaffWorkload.name} already has the maximum ${selectedStaffWorkload.dailyCapacity} orders for this day`
+          : "Selected staff member is at full capacity for this day"
+      )
+      return
     }
 
-    setSubmitting(true);
-
+    setSubmitting(true)
     try {
       await updateOrder(assigningOrder._id, {
-        assignedStaff: assignStaffId || null,
-      });
-      toast.success('Staff assigned successfully');
-      closeModals();
+        assignedStaff: assignStaffId === UNASSIGNED_STAFF_VALUE ? null : assignStaffId,
+      })
+      toast.success("Staff assigned successfully")
+      closeModals()
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to assign staff');
+      toast.error(error.response?.data?.message || "Failed to assign staff")
     } finally {
-      setSubmitting(false);
+      setSubmitting(false)
     }
-  };
+  }
 
   const openMessageModal = (mode, order = null) => {
-    setMessageModal({ mode, order });
-    setMessageText('');
-    setSelectedCustomerId(order?.userId?._id || '');
-  };
+    setMessageModal({ mode, order })
+    setMessageText("")
+    setSelectedCustomerId(order?.userId?._id || "")
+  }
 
   const handleSendMessage = async (e) => {
-    e.preventDefault();
-
+    e.preventDefault()
     if (!messageText.trim()) {
-      toast.error('Enter a message first');
-      return;
+      toast.error("Enter a message first")
+      return
     }
-
-    setSubmitting(true);
-
+    setSubmitting(true)
     try {
-      if (messageModal?.mode === 'all') {
-        const response = await sendBroadcast({ message: messageText.trim() });
-        toast.success(response.message);
+      if (messageModal?.mode === "all") {
+        const response = await sendBroadcast({ message: messageText.trim() })
+        toast.success(response.message)
       } else {
-        const targetUserId = messageModal?.mode === 'single' ? messageModal?.order?.userId?._id : selectedCustomerId;
-
+        const targetUserId =
+          messageModal?.mode === "single" ? messageModal?.order?.userId?._id : selectedCustomerId
         if (!targetUserId) {
-          toast.error('Select a customer first');
-          setSubmitting(false);
-          return;
+          toast.error("Select a customer first")
+          setSubmitting(false)
+          return
         }
-
-        const response = await sendDirect({
-          userId: targetUserId,
-          message: messageText.trim(),
-        });
-        toast.success(response.message);
+        const response = await sendDirect({ userId: targetUserId, message: messageText.trim() })
+        toast.success(response.message)
       }
-
-      closeModals();
+      closeModals()
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to send message');
+      toast.error(error.response?.data?.message || "Failed to send message")
     } finally {
-      setSubmitting(false);
+      setSubmitting(false)
     }
-  };
+  }
+
+  const columns = useMemo(
+    () => [
+      {
+        accessorKey: "orderNumber",
+        header: "Order ID",
+        cell: ({ row }) => (
+          <span className="font-semibold">{row.original.orderNumber}</span>
+        ),
+      },
+      {
+        id: "customer",
+        accessorFn: (row) => row.userId?.name || "N/A",
+        header: "Customer",
+      },
+      {
+        id: "orderType",
+        accessorFn: (row) => formatItemTypes(row.items),
+        header: "Order Type",
+        cell: ({ row }) => (
+          <span className="max-w-[180px] whitespace-normal">{formatItemTypes(row.original.items)}</span>
+        ),
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        accessorKey: "paymentStatus",
+        header: "Payment",
+        cell: ({ row }) => (
+          <PaymentStatusBadge status={row.original.paymentStatus || "pending"} />
+        ),
+      },
+      ...(isAdmin
+        ? [
+            {
+              id: "assignedStaff",
+              accessorFn: (row) => row.assignedStaff?.name || "Unassigned",
+              header: "Assigned Staff",
+            },
+          ]
+        : []),
+      {
+        accessorKey: "createdAt",
+        header: "Date",
+        cell: ({ row }) => formatDate(row.original.createdAt),
+      },
+      {
+        accessorKey: "totalAmount",
+        header: "Amount",
+        cell: ({ row }) => (
+          <span className="font-medium">{formatCurrency(row.original.totalAmount || 0)}</span>
+        ),
+      },
+      {
+        id: "actions",
+        cell: ({ row }) => {
+          const order = row.original
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setSelectedOrder(order)}>
+                  <Eye className="mr-2 h-4 w-4" />View Details
+                </DropdownMenuItem>
+                {canEditOrders && (
+                  <DropdownMenuItem onClick={() => openEditModal(order)}>
+                    <Edit2 className="mr-2 h-4 w-4" />Edit
+                  </DropdownMenuItem>
+                )}
+                {isAdmin && (
+                  <DropdownMenuItem onClick={() => openMessageModal("single", order)}>
+                    <MessageSquare className="mr-2 h-4 w-4" />Message Customer
+                  </DropdownMenuItem>
+                )}
+                {isAdmin && (
+                  <DropdownMenuItem onClick={() => openAssignModal(order)}>
+                    <UserCheck className="mr-2 h-4 w-4" />Assign Staff
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                {canDeleteOrders && (
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => setDeleteOrderId(order._id)}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />Delete
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        },
+      },
+    ],
+    [isAdmin, canEditOrders, canDeleteOrders]
+  )
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Orders</h1>
-          <p className="text-gray-600 mt-1">Manage and track all orders</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {isAdmin && (
-            <>
-              <Button variant="outline" onClick={() => openMessageModal('all')} className="flex items-center gap-2">
-                <Send size={18} />
-                Message All Customers
+    <div className="space-y-8">
+      <PageHeader
+        title="Orders"
+        description="Manage and track all orders"
+        icon={ShoppingCart}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            {isAdmin && (
+              <>
+                <Button variant="outline" onClick={() => openMessageModal("all")}>
+                  <Send className="mr-2 h-4 w-4" />Message All
+                </Button>
+                <Button variant="outline" onClick={() => openMessageModal("customer")}>
+                  <MessageSquare className="mr-2 h-4 w-4" />Message Customer
+                </Button>
+              </>
+            )}
+            {(user?.role === "admin" || user?.role === "client") && (
+              <Button onClick={() => setShowCreateOrderModal(true)}>
+                <Plus className="mr-2 h-4 w-4" />New Order
               </Button>
-              <Button variant="outline" onClick={() => openMessageModal('customer')} className="flex items-center gap-2">
-                <MessageSquare size={18} />
-                Message One Customer
-              </Button>
-            </>
-          )}
-          {(user?.role === 'admin' || user?.role === 'client') && (
-            <Button
-              variant="primary"
-              onClick={() => setShowCreateOrderModal(true)}
-              className="flex items-center gap-2"
-            >
-              <Plus size={20} />
-              New Order
-            </Button>
-          )}
-        </div>
+            )}
+          </div>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Total Orders" value={stats.total} icon={ShoppingCart} />
+        <StatCard label="Pending" value={stats.pending} icon={ShoppingCart} />
+        <StatCard label="Processing" value={stats.processing} icon={ShoppingCart} />
+        <StatCard label="Completed" value={stats.completed} icon={ShoppingCart} />
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent>
-          <div className="flex flex-col md:flex-row gap-4">
-            {/* Search */}
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-3 text-gray-400" size={20} />
-              <input
-                type="text"
-                placeholder="Search by order ID or customer name..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
-              />
-            </div>
+      <Tabs value={statusFilter} onValueChange={setStatusFilter}>
+        <TabsList>
+          {STATUS_TABS.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value}>
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
-            {/* Status Filter */}
-            <div className="flex items-center gap-2">
-              <Filter size={20} className="text-gray-400" />
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
-              >
-                <option value="all">All Status</option>
-                <option value="pending">Pending</option>
-                <option value="washing">Washing</option>
-                <option value="drying">Drying</option>
-                <option value="ready">Ready</option>
-                <option value="delivered">Delivered</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <DataTable
+        columns={columns}
+        data={filteredOrders}
+        searchKey="orderNumber"
+        searchPlaceholder="Search by order ID or customer..."
+        loading={loading}
+        emptyTitle="No orders found"
+        emptyDescription="Try adjusting your filters or create a new order."
+      />
 
-      {/* Orders Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>All Orders</CardTitle>
-          <CardDescription>{filteredOrders.length} orders found</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="text-center py-8">
-              <p className="text-gray-600">Loading orders...</p>
-            </div>
-          ) : filteredOrders.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-gray-600">No orders found</p>
-            </div>
-          ) : (
-            <Table>
-              <TableHead>
-                <TableRow className="bg-gray-50">
-                  <TableHeader>Order ID</TableHeader>
-                  <TableHeader>Customer</TableHeader>
-                  <TableHeader>Order Type</TableHeader>
-                  <TableHeader>Status</TableHeader>
-                  {isAdmin && <TableHeader>Assigned Staff</TableHeader>}
-                  <TableHeader>Date</TableHeader>
-                  <TableHeader>Amount</TableHeader>
-                  <TableHeader>Actions</TableHeader>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredOrders.map((order) => (
-                  <TableRow key={order._id}>
-                    <TableCell className="font-semibold text-gray-900">{order.orderNumber}</TableCell>
-                    <TableCell>{order.userId?.name || 'N/A'}</TableCell>
-                    <TableCell className="whitespace-normal min-w-[180px]">
-                      {formatItemTypes(order.items)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge color={getStatusColor(order.status)}>
-                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                      </Badge>
-                    </TableCell>
-                    {isAdmin && (
-                      <TableCell>{order.assignedStaff?.name || 'Unassigned'}</TableCell>
-                    )}
-                    <TableCell>{formatDate(order.createdAt)}</TableCell>
-                    <TableCell className="font-medium text-gray-900">
-                      ${order.totalAmount?.toFixed(2) || '0.00'}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => openViewModal(order)}
-                          className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                        >
-                          <Eye size={18} />
-                        </button>
-                        {canEditOrders && (
-                          <button
-                            onClick={() => openEditModal(order)}
-                            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                          >
-                            <Edit2 size={18} />
-                          </button>
-                        )}
-                        {isAdmin && (
-                          <button
-                            onClick={() => openMessageModal('single', order)}
-                            className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                            title="Send message to customer"
-                          >
-                            <MessageSquare size={18} />
-                          </button>
-                        )}
-                        {isAdmin && (
-                          <button
-                            onClick={() => openAssignModal(order)}
-                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                            title="Assign staff"
-                          >
-                            <UserCheck size={18} />
-                          </button>
-                        )}
-                        {canDeleteOrders && (
-                          <button
-                            onClick={() => handleDeleteOrder(order._id)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {/* Order Detail Sheet */}
+      <Sheet open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+          {selectedOrder && (
+            <div className="space-y-6">
+              <SheetHeader>
+                <SheetTitle>{selectedOrder.orderNumber}</SheetTitle>
+                <SheetDescription>
+                  {selectedOrder.userId?.name || "N/A"} • {formatDate(selectedOrder.createdAt)}
+                </SheetDescription>
+              </SheetHeader>
 
-      {selectedOrder && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <Card className="w-full max-w-lg">
-            <CardHeader>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <CardTitle>{selectedOrder.orderNumber}</CardTitle>
-                  <CardDescription>
-                    {selectedOrder.userId?.name || 'N/A'} • {formatDate(selectedOrder.createdAt)}
-                  </CardDescription>
-                </div>
-                <button
-                  onClick={closeModals}
-                  className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <p className="text-sm text-gray-600 mb-1">Order Type</p>
-                    <p className="font-semibold text-gray-900">{formatItemTypes(selectedOrder.items)}</p>
-                  </div>
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <p className="text-sm text-gray-600 mb-1">Amount</p>
-                    <p className="font-semibold text-gray-900">
-                      ${selectedOrder.totalAmount?.toFixed(2) || '0.00'}
-                    </p>
-                  </div>
-                </div>
-                <div className="p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-600 mb-1">Status</p>
-                  <Badge color={getStatusColor(selectedOrder.status)}>
-                    {selectedOrder.status.charAt(0).toUpperCase() + selectedOrder.status.slice(1)}
-                  </Badge>
-                </div>
-                <div className="p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-600 mb-1">Delivery Notes</p>
-                  <p className="text-gray-900">{selectedOrder.deliveryNotes || 'No notes added'}</p>
-                </div>
-                {isAdmin && (
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <p className="text-sm text-gray-600 mb-1">Assigned Staff</p>
-                    <p className="text-gray-900">{selectedOrder.assignedStaff?.name || 'Unassigned'}</p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+              <OrderTimeline status={selectedOrder.status} />
 
-      {editingOrder && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <Card className="w-full max-w-lg">
-            <CardHeader>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <CardTitle>Update Order</CardTitle>
-                  <CardDescription>{editingOrder.orderNumber}</CardDescription>
-                </div>
-                <button
-                  onClick={closeModals}
-                  className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleUpdateOrder} className="space-y-4">
-                {canManageStatus && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Status
-                    </label>
-                    <select
-                      name="status"
-                      value={editFormData.status}
-                      onChange={handleEditInputChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="washing">Washing</option>
-                      <option value="drying">Drying</option>
-                      <option value="ready">Ready</option>
-                      <option value="delivered">Delivered</option>
-                    </select>
-                  </div>
-                )}
+              <Separator />
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Delivery Notes
-                  </label>
-                  <textarea
-                    name="deliveryNotes"
-                    value={editFormData.deliveryNotes}
-                    onChange={handleEditInputChange}
-                    rows={4}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2563EB] resize-none"
-                    placeholder="Add delivery notes"
-                  />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded-[10px] bg-muted/50 p-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Order Type</p>
+                  <p className="mt-1 text-sm font-semibold">{formatItemTypes(selectedOrder.items)}</p>
                 </div>
-
-                <div className="flex gap-4 pt-2">
-                  <Button type="submit" variant="primary" disabled={submitting} className="flex-1">
-                    {submitting ? 'Saving...' : 'Update Order'}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={closeModals} className="flex-1">
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {assigningOrder && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <Card className="w-full max-w-lg">
-            <CardHeader>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <CardTitle>Assign Staff</CardTitle>
-                  <CardDescription>{assigningOrder.orderNumber}</CardDescription>
-                </div>
-                <button
-                  onClick={closeModals}
-                  className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleAssignOrder} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Staff Member
-                  </label>
-                  <select
-                    value={assignStaffId}
-                    onChange={(e) => setAssignStaffId(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
-                  >
-                    <option value="">Unassigned</option>
-                    {staffMembers.map((staff) => (
-                      <option key={staff._id} value={staff._id}>
-                        {staff.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex gap-4 pt-2">
-                  <Button type="submit" variant="primary" disabled={submitting} className="flex-1">
-                    {submitting ? 'Saving...' : 'Assign Staff'}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={closeModals} className="flex-1">
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {messageModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <Card className="w-full max-w-lg">
-            <CardHeader>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <CardTitle>
-                    {messageModal.mode === 'all' ? 'Message All Customers' : 'Send Customer Message'}
-                  </CardTitle>
-                  <CardDescription>
-                    {messageModal.mode === 'single'
-                      ? messageModal.order?.userId?.name
-                      : messageModal.mode === 'customer'
-                        ? 'Choose a customer and send an in-app message'
-                        : 'Broadcast an in-app message to all customers'}
-                  </CardDescription>
-                </div>
-                <button
-                  onClick={closeModals}
-                  className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSendMessage} className="space-y-4">
-                {messageModal.mode === 'customer' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Customer
-                    </label>
-                    <select
-                      value={selectedCustomerId}
-                      onChange={(e) => setSelectedCustomerId(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
-                    >
-                      <option value="">Select customer</option>
-                      {customers.map((customer) => (
-                        <option key={customer._id} value={customer._id}>
-                          {customer.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Message
-                  </label>
-                  <textarea
-                    value={messageText}
-                    onChange={(e) => setMessageText(e.target.value)}
-                    rows={5}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#2563EB] resize-none"
-                    placeholder="Type your message to customers..."
-                  />
-                  <p className="mt-2 text-xs text-gray-500">
-                    Messages are delivered as in-app notifications. External email/SMS delivery is not configured yet.
+                <div className="rounded-[10px] bg-muted/50 p-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Amount</p>
+                  <p className="mt-1 text-sm font-semibold">
+                    {formatCurrency(selectedOrder.totalAmount || 0)}
                   </p>
                 </div>
+              </div>
 
-                <div className="flex gap-4 pt-2">
-                  <Button type="submit" variant="primary" disabled={submitting} className="flex-1">
-                    {submitting ? 'Sending...' : 'Send Message'}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={closeModals} className="flex-1">
-                    Cancel
-                  </Button>
+              <div className="rounded-[10px] bg-muted/50 p-4">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Status</p>
+                <div className="mt-2">
+                  <StatusBadge status={selectedOrder.status} />
                 </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+              </div>
+
+              <div className="rounded-[10px] bg-muted/50 p-4">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Payment Status</p>
+                <div className="mt-2">
+                  <PaymentStatusBadge status={selectedOrder.paymentStatus || "pending"} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="rounded-[10px] bg-muted/50 p-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Pickup Address</p>
+                  <p className="mt-1 text-sm">{selectedOrder.pickupAddress || "Not provided"}</p>
+                </div>
+                <div className="rounded-[10px] bg-muted/50 p-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Delivery Address</p>
+                  <p className="mt-1 text-sm">{selectedOrder.deliveryAddress || "Not provided"}</p>
+                </div>
+              </div>
+
+              <div className="rounded-[10px] bg-muted/50 p-4">
+                <p className="text-xs font-semibold uppercase text-muted-foreground">Delivery Notes</p>
+                <p className="mt-1 text-sm">{selectedOrder.deliveryNotes || "No notes added"}</p>
+              </div>
+
+              {isAdmin && (
+                <div className="rounded-[10px] bg-muted/50 p-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Assigned Staff</p>
+                  <p className="mt-1 text-sm">{selectedOrder.assignedStaff?.name || "Unassigned"}</p>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedOrder(selectedOrder)
+                    setTimeout(() => window.print(), 300)
+                  }}
+                >
+                  <Printer className="mr-2 h-4 w-4" />Print
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => toast.success("Invoice ready")}>
+                  <FileText className="mr-2 h-4 w-4" />Invoice
+                </Button>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editingOrder} onOpenChange={() => closeModals()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Update Order</DialogTitle>
+            <DialogDescription>{editingOrder?.orderNumber}</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleUpdateOrder} className="space-y-4">
+            {canManageStatus && (
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select
+                  value={editFormData.status}
+                  onValueChange={(value) => setEditFormData((prev) => ({ ...prev, status: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="washing">Washing</SelectItem>
+                    <SelectItem value="drying">Drying</SelectItem>
+                    <SelectItem value="ready">Ready</SelectItem>
+                    <SelectItem value="delivered">Delivered</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {isAdmin && (
+              <div className="space-y-2">
+                <Label>Payment Status</Label>
+                <Select
+                  value={editFormData.paymentStatus}
+                  onValueChange={(value) =>
+                    setEditFormData((prev) => ({ ...prev, paymentStatus: value }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="paid">Paid</SelectItem>
+                    <SelectItem value="pending">Not Paid</SelectItem>
+                    <SelectItem value="failed">Failed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>Delivery Notes</Label>
+              <Textarea
+                value={editFormData.deliveryNotes}
+                onChange={(e) =>
+                  setEditFormData((prev) => ({ ...prev, deliveryNotes: e.target.value }))
+                }
+                rows={4}
+                placeholder="Add delivery notes"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeModals}>
+                Cancel
+              </Button>
+              <Button type="submit" loading={submitting}>
+                Update Order
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign Staff Dialog */}
+      <Dialog open={!!assigningOrder} onOpenChange={() => closeModals()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assign Staff</DialogTitle>
+            <DialogDescription>{assigningOrder?.orderNumber}</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAssignOrder} className="space-y-4">
+            <div className="rounded-[10px] bg-muted/50 p-3 text-sm text-muted-foreground">
+              Pickup day:{" "}
+              <span className="font-semibold text-foreground">
+                {assigningOrder?.pickupDate ? formatDate(assigningOrder.pickupDate) : "Today"}
+              </span>
+            </div>
+            <div className="space-y-2">
+              <Label>Staff Member</Label>
+              <Select value={assignStaffId} onValueChange={setAssignStaffId} disabled={loadingWorkloads}>
+                <SelectTrigger>
+                  <SelectValue placeholder={loadingWorkloads ? "Loading workload..." : "Unassigned"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={UNASSIGNED_STAFF_VALUE}>Unassigned</SelectItem>
+                  {staffMembers.map((staff) => {
+                    const workload = getStaffWorkload(staff._id)
+                    const isFull = workload?.isAtCapacity
+                    return (
+                      <SelectItem key={staff._id} value={staff._id} disabled={isFull}>
+                        {formatStaffWorkloadLabel(staff.name, workload)}
+                        {isFull ? " (Full)" : ""}
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+              {selectedStaffWorkload && !selectedStaffWorkload.isAtCapacity && (
+                <p className="text-sm text-muted-foreground">
+                  {selectedStaffWorkload.name} has{" "}
+                  <span className="font-semibold text-foreground">
+                    {selectedStaffWorkload.assignedCount}/{selectedStaffWorkload.dailyCapacity}
+                  </span>{" "}
+                  orders on this day
+                  {selectedStaffWorkload.remainingCapacity > 0 && (
+                    <> — {selectedStaffWorkload.remainingCapacity} slot{selectedStaffWorkload.remainingCapacity === 1 ? "" : "s"} left</>
+                  )}
+                </p>
+              )}
+              {selectedStaffWorkload?.isAtCapacity && (
+                <p className="text-sm font-medium text-destructive">
+                  {selectedStaffWorkload.name} is at full capacity for this pickup day and cannot take more orders.
+                </p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeModals}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                loading={submitting}
+                disabled={
+                  assignStaffId !== UNASSIGNED_STAFF_VALUE && isStaffAtCapacity(selectedStaffWorkload)
+                }
+              >
+                Assign Staff
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Message Dialog */}
+      <Dialog open={!!messageModal} onOpenChange={() => closeModals()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {messageModal?.mode === "all" ? "Message All Customers" : "Send Customer Message"}
+            </DialogTitle>
+            <DialogDescription>
+              {messageModal?.mode === "single"
+                ? messageModal.order?.userId?.name
+                : messageModal?.mode === "customer"
+                  ? "Choose a customer and send an in-app message"
+                  : "Broadcast an in-app message to all customers"}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSendMessage} className="space-y-4">
+            {messageModal?.mode === "customer" && (
+              <div className="space-y-2">
+                <Label>Customer</Label>
+                <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select customer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {customers.map((customer) => (
+                      <SelectItem key={customer._id} value={customer._id}>
+                        {customer.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>Message</Label>
+              <Textarea
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                rows={5}
+                placeholder="Type your message to customers..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Messages are delivered as in-app notifications.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeModals}>
+                Cancel
+              </Button>
+              <Button type="submit" loading={submitting}>
+                Send Message
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete AlertDialog */}
+      <AlertDialog open={!!deleteOrderId} onOpenChange={() => setDeleteOrderId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Order</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this order? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {showCreateOrderModal && (
         <NewOrder
           isModal
           onCancel={() => setShowCreateOrderModal(false)}
           onSuccess={async () => {
-            setShowCreateOrderModal(false);
-            await fetchOrders(user?.role === 'client' ? { userId: user._id } : {});
+            setShowCreateOrderModal(false)
+            await fetchOrders(user?.role === "client" ? { userId: user._id } : {})
           }}
         />
       )}
     </div>
-  );
-};
-
-export default Orders;
+  )
+}

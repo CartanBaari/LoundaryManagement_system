@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { orderAPI } from '../services/api';
 
 export const useOrders = () => {

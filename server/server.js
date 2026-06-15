@@ -95,6 +95,11 @@ const seedAdmin = async () => {
       console.log("Admin user created: admin@example.com / Admin@123");
     } else {
       await upsertUserRole(existingAdmin._id, 'admin');
+      if (process.env.NODE_ENV === 'development') {
+        existingAdmin.password = 'Admin@123';
+        await existingAdmin.save();
+        console.log('Dev admin ready: admin@example.com / Admin@123');
+      }
     }
   } catch (error) {
     console.log("Admin seed error:", error.message);

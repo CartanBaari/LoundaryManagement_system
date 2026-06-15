@@ -37,6 +37,11 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    dailyCapacity: {
+      type: Number,
+      default: 10,
+      min: [1, 'Daily capacity must be at least 1'],
+    },
     avatar: {
       type: String,
       default: null,

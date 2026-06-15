@@ -1,369 +1,289 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Tags, Search, Layers, ClipboardList, X, Plus, Edit2, Trash2 } from 'lucide-react';
-import toast from 'react-hot-toast';
-import FeatureWorkspace from '../components/common/FeatureWorkspace';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/common/Card';
-import { Button } from '../components/common/Button';
-import { categoryAPI } from '../services/api';
+import { useEffect, useMemo, useState } from "react"
+import { Tags, Plus, Edit2, Trash2, Layers, ClipboardList } from "lucide-react"
+import { toast } from "sonner"
+import { categoryAPI } from "@/services/api"
+import PageHeader from "@/components/shared/PageHeader"
+import StatCard from "@/components/shared/StatCard"
+import DataTable from "@/components/shared/DataTable"
+import StatusBadge from "@/components/shared/StatusBadge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
-const initialFormState = {
-  name: '',
-  description: '',
-  status: 'active',
-};
+const initialFormState = { name: "", description: "", status: "active" }
 
-const ItemsCategories = () => {
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showCategoryModal, setShowCategoryModal] = useState(false);
-  const [editingCategoryId, setEditingCategoryId] = useState(null);
-  const [categoryForm, setCategoryForm] = useState(initialFormState);
-  const [submitting, setSubmitting] = useState(false);
+export default function ItemsCategories() {
+  const [categories, setCategories] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showCategoryModal, setShowCategoryModal] = useState(false)
+  const [editingCategoryId, setEditingCategoryId] = useState(null)
+  const [deleteCategoryId, setDeleteCategoryId] = useState(null)
+  const [categoryForm, setCategoryForm] = useState(initialFormState)
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     const loadCategories = async () => {
       try {
-        setLoading(true);
-        const response = await categoryAPI.getAll();
-        setCategories(response.data?.categories || []);
-      } catch (error) {
-        toast.error('Failed to load categories');
+        setLoading(true)
+        const response = await categoryAPI.getAll()
+        setCategories(response.data?.categories || [])
+      } catch {
+        toast.error("Failed to load categories")
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
-    };
-
-    loadCategories();
-  }, []);
-
-  const filteredCategories = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
-    if (!query) {
-      return categories;
     }
-
-    return categories.filter(
-      (category) =>
-        category.name.toLowerCase().includes(query) ||
-        category.description.toLowerCase().includes(query) ||
-        category.status.toLowerCase().includes(query)
-    );
-  }, [categories, searchTerm]);
+    loadCategories()
+  }, [])
 
   const stats = useMemo(() => {
-    const activeCategories = categories.filter((category) => category.status === 'active').length;
-    const reviewCategories = categories.filter((category) => category.status === 'review').length;
-
-    return [
-      {
-        label: 'Categories',
-        value: String(categories.length),
-        badge: 'Catalog',
-        icon: Tags,
-        tone: 'indigo',
-        helper: 'Laundry categories currently available in the system',
-      },
-      {
-        label: 'Active',
-        value: String(activeCategories),
-        badge: 'Visible',
-        icon: Layers,
-        tone: 'sky',
-        helper: 'Categories ready to be used for services',
-      },
-      {
-        label: 'Needs Review',
-        value: String(reviewCategories),
-        badge: 'Attention',
-        icon: ClipboardList,
-        tone: 'amber',
-        helper: 'Categories waiting for updates or approval',
-      },
-    ];
-  }, [categories]);
+    const active = categories.filter((c) => c.status === "active").length
+    const review = categories.filter((c) => c.status === "review").length
+    return { total: categories.length, active, review }
+  }, [categories])
 
   const closeCategoryModal = () => {
-    setShowCategoryModal(false);
-    setEditingCategoryId(null);
-    setCategoryForm(initialFormState);
-  };
-
-  const handleCategoryInputChange = (e) => {
-    const { name, value } = e.target;
-    setCategoryForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
+    setShowCategoryModal(false)
+    setEditingCategoryId(null)
+    setCategoryForm(initialFormState)
+  }
 
   const handleAddCategory = async (e) => {
-    e.preventDefault();
-
+    e.preventDefault()
     const payload = {
       name: categoryForm.name.trim(),
       description: categoryForm.description.trim(),
       status: categoryForm.status,
-    };
-
-    if (!payload.name || !payload.description) {
-      toast.error('Please complete all category fields');
-      return;
     }
-
-    setSubmitting(true);
-
+    if (!payload.name || !payload.description) {
+      toast.error("Please complete all category fields")
+      return
+    }
+    setSubmitting(true)
     try {
       if (editingCategoryId) {
-        const response = await categoryAPI.update(editingCategoryId, payload);
+        const response = await categoryAPI.update(editingCategoryId, payload)
         setCategories((prev) =>
-          prev.map((category) => (category._id === editingCategoryId ? response.data.category : category))
-        );
-        toast.success('Category updated successfully');
+          prev.map((c) => (c._id === editingCategoryId ? response.data.category : c))
+        )
+        toast.success("Category updated successfully")
       } else {
-        const response = await categoryAPI.create(payload);
-        setCategories((prev) => [response.data.category, ...prev]);
-        toast.success('Category added successfully');
+        const response = await categoryAPI.create(payload)
+        setCategories((prev) => [response.data.category, ...prev])
+        toast.success("Category added successfully")
       }
-
-      closeCategoryModal();
+      closeCategoryModal()
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to save category');
+      toast.error(error.response?.data?.message || "Failed to save category")
     } finally {
-      setSubmitting(false);
+      setSubmitting(false)
     }
-  };
+  }
 
   const handleEditCategory = (category) => {
-    setEditingCategoryId(category._id);
+    setEditingCategoryId(category._id)
     setCategoryForm({
       name: category.name,
       description: category.description,
       status: category.status,
-    });
-    setShowCategoryModal(true);
-  };
+    })
+    setShowCategoryModal(true)
+  }
 
-  const handleDeleteCategory = async (categoryId) => {
-    if (!window.confirm('Are you sure you want to delete this category?')) {
-      return;
-    }
-
+  const handleConfirmDelete = async () => {
+    if (!deleteCategoryId) return
     try {
-      await categoryAPI.delete(categoryId);
-      setCategories((prev) => prev.filter((category) => category._id !== categoryId));
-      toast.success('Category deleted successfully');
+      await categoryAPI.delete(deleteCategoryId)
+      setCategories((prev) => prev.filter((c) => c._id !== deleteCategoryId))
+      toast.success("Category deleted successfully")
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to delete category');
+      toast.error(error.response?.data?.message || "Failed to delete category")
+    } finally {
+      setDeleteCategoryId(null)
     }
-  };
+  }
+
+  const columns = useMemo(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Name",
+        cell: ({ row }) => (
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-primary/10">
+              <Tags className="h-4 w-4 text-primary" />
+            </div>
+            <span className="font-semibold">{row.original.name}</span>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "description",
+        header: "Description",
+        cell: ({ row }) => (
+          <span className="max-w-[260px] whitespace-normal text-sm text-muted-foreground">
+            {row.original.description}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        cell: ({ row }) => (
+          <StatusBadge status={row.original.status === "active" ? "active" : "pending"} />
+        ),
+      },
+      {
+        id: "actions",
+        cell: ({ row }) => (
+          <div className="flex gap-1">
+            <Button variant="ghost" size="icon" onClick={() => handleEditCategory(row.original)}>
+              <Edit2 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-destructive hover:text-destructive"
+              onClick={() => setDeleteCategoryId(row.original._id)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    []
+  )
 
   return (
-    <>
-      <FeatureWorkspace
-        eyebrow="Catalog Control"
+    <div className="space-y-8">
+      <PageHeader
         title="Categories"
-        description="Manage laundry categories with clear descriptions, statuses, and consistent dashboard organization."
-        tone="indigo"
-        actions={[
-          {
-            label: 'Add Category',
-            icon: Plus,
-            variant: 'primary',
-            onClick: () => {
-              setEditingCategoryId(null);
-              setCategoryForm(initialFormState);
-              setShowCategoryModal(true);
-            },
-            className: 'rounded-2xl bg-[#3a2fd0] px-6 py-3 hover:bg-[#2f26af]',
-          },
-        ]}
-        stats={stats}
-        filters={[
-          {
-            label: 'search',
-            icon: Search,
-            content: (
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search category name, description, or status..."
-                className="w-[320px] max-w-full bg-transparent text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none"
-              />
-            ),
-          },
-        ]}
-        tableTitle="Category List"
-        tableDescription={`Manage category records only. Showing ${filteredCategories.length} categor${filteredCategories.length === 1 ? 'y' : 'ies'}.`}
-        columns={[
-          {
-            key: 'name',
-            label: 'Name',
-            render: (value) => (
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-100 text-[#3a2fd0]">
-                  <Tags className="h-5 w-5" />
-                </div>
-                <span className="font-semibold text-slate-900">{value}</span>
-              </div>
-            ),
-          },
-          {
-            key: 'description',
-            label: 'Description',
-            className: 'whitespace-normal min-w-[260px]',
-          },
-          {
-            key: 'status',
-            label: 'Status',
-            render: (value) => (
-              <span
-                className={`rounded-full px-3 py-1 text-sm font-medium ${
-                  value === 'active'
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-amber-100 text-amber-700'
-                }`}
-              >
-                {value === 'active' ? 'Active' : 'Review'}
-              </span>
-            ),
-          },
-          {
-            key: 'actions',
-            label: 'Actions',
-            render: (_, row) => (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleEditCategory(row)}
-                  className="rounded-xl p-2 text-slate-600 transition-colors hover:bg-slate-100"
-                >
-                  <Edit2 className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteCategory(row._id)}
-                  className="rounded-xl p-2 text-red-600 transition-colors hover:bg-red-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            ),
-          },
-        ]}
-        rows={filteredCategories}
-        sidePanels={[
-          {
-            title: 'Category Notes',
-            description: 'Current category descriptions available to the team.',
-            content: (
-              <div className="space-y-3">
-                {categories.map((category) => (
-                  <div key={category._id} className="rounded-2xl bg-[#f6f5ff] p-4 text-slate-700">
-                    <p className="font-semibold text-slate-900">{category.name}</p>
-                    <p className="mt-1 text-sm text-slate-600">{category.description}</p>
-                  </div>
-                ))}
-              </div>
-            ),
-          },
-          {
-            title: 'Status Overview',
-            description: 'A quick view of category readiness across the catalog.',
-            content: (
-              <div className="space-y-4">
-                {[
-                  `${categories.filter((category) => category.status === 'active').length} active categories are available now`,
-                  `${categories.filter((category) => category.status === 'review').length} categories are pending review`,
-                  'Service forms now choose category from this list as a dropdown',
-                ].map((item) => (
-                  <div key={item} className="rounded-2xl bg-[#fafaff] p-4 text-slate-700">
-                    {item}
-                  </div>
-                ))}
-              </div>
-            ),
-          },
-        ]}
+        description="Manage laundry categories with descriptions and statuses."
+        icon={Tags}
+        action={
+          <Button
+            onClick={() => {
+              setEditingCategoryId(null)
+              setCategoryForm(initialFormState)
+              setShowCategoryModal(true)
+            }}
+          >
+            <Plus className="mr-2 h-4 w-4" />Add Category
+          </Button>
+        }
       />
 
-      {showCategoryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm">
-          <Card className="w-full max-w-xl rounded-[28px] border-indigo-100 shadow-[0_30px_80px_rgba(58,47,208,0.18)]">
-            <CardHeader className="border-b border-slate-100 pb-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <CardTitle className="text-2xl">{editingCategoryId ? 'Edit Category' : 'Add New Category'}</CardTitle>
-                  <CardDescription>
-                    {editingCategoryId
-                      ? 'Update the category details while keeping the rest of the catalog intact.'
-                      : 'Create a new laundry category with a clear description and status.'}
-                  </CardDescription>
-                </div>
-                <button
-                  type="button"
-                  onClick={closeCategoryModal}
-                  className="rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <form onSubmit={handleAddCategory} className="space-y-5">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Name</label>
-                  <input
-                    type="text"
-                    name="name"
-                    value={categoryForm.name}
-                    onChange={handleCategoryInputChange}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:border-[#3a2fd0] focus:outline-none focus:ring-2 focus:ring-[#3a2fd0]/15"
-                    required
-                  />
-                </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="Categories" value={stats.total} icon={Tags} loading={loading} />
+        <StatCard label="Active" value={stats.active} icon={Layers} loading={loading} />
+        <StatCard label="Needs Review" value={stats.review} icon={ClipboardList} loading={loading} />
+      </div>
 
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Description</label>
-                  <textarea
-                    name="description"
-                    value={categoryForm.description}
-                    onChange={handleCategoryInputChange}
-                    rows={4}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:border-[#3a2fd0] focus:outline-none focus:ring-2 focus:ring-[#3a2fd0]/15"
-                    required
-                  />
-                </div>
+      <DataTable
+        columns={columns}
+        data={categories}
+        searchKey="name"
+        searchPlaceholder="Search categories..."
+        loading={loading}
+        emptyTitle="No categories found"
+        emptyDescription="Add categories to organize your services."
+      />
 
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Status</label>
-                  <select
-                    name="status"
-                    value={categoryForm.status}
-                    onChange={handleCategoryInputChange}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 focus:border-[#3a2fd0] focus:outline-none focus:ring-2 focus:ring-[#3a2fd0]/15"
-                  >
-                    <option value="active">Active</option>
-                    <option value="review">Review</option>
-                  </select>
-                </div>
+      <Dialog open={showCategoryModal} onOpenChange={closeCategoryModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingCategoryId ? "Edit Category" : "Add New Category"}</DialogTitle>
+            <DialogDescription>
+              {editingCategoryId ? "Update category details." : "Create a new laundry category."}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAddCategory} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input
+                value={categoryForm.name}
+                onChange={(e) => setCategoryForm((p) => ({ ...p, name: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea
+                value={categoryForm.description}
+                onChange={(e) => setCategoryForm((p) => ({ ...p, description: e.target.value }))}
+                rows={4}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select
+                value={categoryForm.status}
+                onValueChange={(v) => setCategoryForm((p) => ({ ...p, status: v }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="review">Review</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeCategoryModal}>Cancel</Button>
+              <Button type="submit" loading={submitting}>
+                {editingCategoryId ? "Update Category" : "Add Category"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-                <div className="flex gap-4 pt-2">
-                  <Button type="submit" variant="primary" disabled={submitting} className="flex-1 rounded-2xl bg-[#3a2fd0] py-3 hover:bg-[#2f26af]">
-                    {submitting ? 'Saving...' : editingCategoryId ? 'Update Category' : 'Add Category'}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={closeCategoryModal} className="flex-1 rounded-2xl py-3">
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-    </>
-  );
-};
-
-export default ItemsCategories;
+      <AlertDialog open={!!deleteCategoryId} onOpenChange={() => setDeleteCategoryId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Category</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this category? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}

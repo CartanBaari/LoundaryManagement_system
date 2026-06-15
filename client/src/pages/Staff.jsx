@@ -1,564 +1,528 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import {
   Briefcase,
   UserCog,
-  Search,
-  TimerReset,
-  ShieldCheck,
   CalendarClock,
-  X,
   Edit2,
   Trash2,
-} from 'lucide-react';
-import toast from 'react-hot-toast';
-import { useAuth } from '../context/AuthContext';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/common/Card';
-import { Button } from '../components/common/Button';
-import FeatureWorkspace from '../components/common/FeatureWorkspace';
-import { api, orderAPI, userAPI } from '../services/api';
+  MoreHorizontal,
+  CheckCircle,
+  Clock,
+  Phone,
+  Mail,
+  MapPin,
+} from "lucide-react"
+import { toast } from "sonner"
+import { useAuth } from "@/context/AuthContext"
+import { api, orderAPI, userAPI } from "@/services/api"
+import PageHeader from "@/components/shared/PageHeader"
+import DataTable from "@/components/shared/DataTable"
+import StatCard from "@/components/shared/StatCard"
+import StatusBadge from "@/components/shared/StatusBadge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent } from "@/components/ui/card"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Separator } from "@/components/ui/separator"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { getInitials } from "@/lib/utils"
 
-const Staff = () => {
-  const navigate = useNavigate();
-  const { user } = useAuth();
-  const [staffMembers, setStaffMembers] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
-  const [savingStaff, setSavingStaff] = useState(false);
-  const [editingStaff, setEditingStaff] = useState(null);
+const availabilityVariant = (availability) => {
+  if (availability === "Available") return "default"
+  if (availability === "At Capacity") return "destructive"
+  return "secondary"
+}
+
+export default function Staff() {
+  const navigate = useNavigate()
+  const { user } = useAuth()
+  const [staffMembers, setStaffMembers] = useState([])
+  const [orders, setOrders] = useState([])
+  const [todayWorkloads, setTodayWorkloads] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showStaffModal, setShowStaffModal] = useState(false)
+  const [savingStaff, setSavingStaff] = useState(false)
+  const [editingStaff, setEditingStaff] = useState(null)
+  const [deleteStaffId, setDeleteStaffId] = useState(null)
+  const [selectedStaff, setSelectedStaff] = useState(null)
   const [staffFormData, setStaffFormData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    address: '',
-  });
+    name: "",
+    email: "",
+    phone: "",
+    address: "",
+    dailyCapacity: "10",
+  })
 
-  useEffect(() => {
-    const loadStaffData = async () => {
-      try {
-        setLoading(true);
-
-        const [staffResponse, ordersResponse] = await Promise.all([
-          userAPI.getStaff(),
-          orderAPI.getAll(),
-        ]);
-
-        setStaffMembers(staffResponse.data?.staffMembers || []);
-        setOrders(ordersResponse.data?.orders || []);
-      } catch (error) {
-        toast.error('Failed to load staff overview');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadStaffData();
-  }, []);
+  const isAdmin = user?.role === "admin"
 
   const reloadStaffData = async () => {
     try {
-      setLoading(true);
-
-      const [staffResponse, ordersResponse] = await Promise.all([
+      setLoading(true)
+      const [staffResponse, ordersResponse, workloadResponse] = await Promise.all([
         userAPI.getStaff(),
         orderAPI.getAll(),
-      ]);
-
-      setStaffMembers(staffResponse.data?.staffMembers || []);
-      setOrders(ordersResponse.data?.orders || []);
-    } catch (error) {
-      toast.error('Failed to refresh staff overview');
+        userAPI.getStaffWorkload({ date: new Date().toISOString().split("T")[0] }),
+      ])
+      setStaffMembers(staffResponse.data?.staffMembers || [])
+      setOrders(ordersResponse.data?.orders || [])
+      setTodayWorkloads(workloadResponse.data?.workloads || [])
+    } catch {
+      toast.error("Failed to load staff overview")
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
+
+  useEffect(() => {
+    if (isAdmin) reloadStaffData()
+  }, [isAdmin])
 
   const staffRows = useMemo(() => {
-    const assignedOrdersByStaff = orders.reduce((accumulator, order) => {
-      const staffId = order.assignedStaff?._id;
+    const assignedOrdersByStaff = orders.reduce((acc, order) => {
+      const staffId = order.assignedStaff?._id
+      if (!staffId) return acc
+      if (!acc[staffId]) acc[staffId] = []
+      acc[staffId].push(order)
+      return acc
+    }, {})
 
-      if (!staffId) {
-        return accumulator;
-      }
-
-      if (!accumulator[staffId]) {
-        accumulator[staffId] = [];
-      }
-
-      accumulator[staffId].push(order);
-      return accumulator;
-    }, {});
-
-    const rows = staffMembers.map((member) => {
-      const assignedOrders = assignedOrdersByStaff[member._id] || [];
-      const activeAssignments = assignedOrders.filter((order) => order.status !== 'delivered');
-      const completedAssignments = assignedOrders.filter((order) => order.status === 'delivered');
-      const createdDate = member.createdAt ? new Date(member.createdAt) : null;
-
+    return staffMembers.map((member) => {
+      const assignedOrders = assignedOrdersByStaff[member._id] || []
+      const activeAssignments = assignedOrders.filter((o) => o.status !== "delivered")
+      const completedAssignments = assignedOrders.filter((o) => o.status === "delivered")
+      const todayWorkload = todayWorkloads.find((entry) => entry.staffId === String(member._id))
+      const dailyCapacity = todayWorkload?.dailyCapacity ?? member.dailyCapacity ?? 10
+      const todayAssigned = todayWorkload?.assignedCount ?? 0
       return {
         id: member._id,
-        member: member.name || 'Unnamed Staff',
-        role: member.phone || member.email || 'Staff member',
-        email: member.email || '',
-        phone: member.phone || 'N/A',
-        address: member.address?.trim() || 'No address provided',
-        shift: activeAssignments.length > 0 ? 'Assigned' : 'Available',
-        workload: `${activeAssignments.length} active order${activeAssignments.length === 1 ? '' : 's'}`,
-        status: member.isActive !== false ? 'On Duty' : 'Off Duty',
+        member,
+        name: member.name || "Unnamed Staff",
+        email: member.email || "",
+        phone: member.phone || "N/A",
+        address: member.address?.trim() || "No address provided",
+        availability: todayWorkload?.isAtCapacity
+          ? "At Capacity"
+          : activeAssignments.length > 0
+            ? "Assigned"
+            : "Available",
+        activeCount: activeAssignments.length,
+        completedCount: completedAssignments.length,
         totalAssigned: assignedOrders.length,
-        completedAssignments: completedAssignments.length,
-        joinedLabel: createdDate
-          ? createdDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-          : 'N/A',
-      };
-    });
-
-    if (!searchTerm) {
-      return rows;
-    }
-
-    const query = searchTerm.toLowerCase();
-    return rows.filter((row) =>
-      row.member.toLowerCase().includes(query) ||
-      row.role.toLowerCase().includes(query) ||
-      row.shift.toLowerCase().includes(query) ||
-      row.status.toLowerCase().includes(query)
-    );
-  }, [orders, searchTerm, staffMembers]);
+        dailyCapacity,
+        todayAssigned,
+        todayWorkloadLabel: `${todayAssigned}/${dailyCapacity}`,
+        remainingToday: todayWorkload?.remainingCapacity ?? Math.max(0, dailyCapacity - todayAssigned),
+        isActive: member.isActive !== false,
+      }
+    })
+  }, [orders, staffMembers, todayWorkloads])
 
   const stats = useMemo(() => {
-    const activeStaff = staffMembers.filter((member) => member.isActive !== false).length;
-    const totalStaff = staffMembers.length;
-    const assignedOrders = orders.filter((order) => order.assignedStaff?._id);
-    const openAssignedOrders = assignedOrders.filter((order) => order.status !== 'delivered').length;
-    const shiftsCovered = totalStaff === 0 ? 0 : Math.round((activeStaff / totalStaff) * 100);
-    const backlogRisk =
-      activeStaff === 0 ? 'High' : openAssignedOrders > activeStaff * 3 ? 'Medium' : 'Low';
+    const activeStaff = staffMembers.filter((m) => m.isActive !== false).length
+    const openAssigned = orders.filter((o) => o.assignedStaff?._id && o.status !== "delivered").length
+    const shiftsCovered = staffMembers.length === 0 ? 0 : Math.round((activeStaff / staffMembers.length) * 100)
+    return { activeStaff, total: staffMembers.length, openAssigned, shiftsCovered }
+  }, [orders, staffMembers])
 
-    return {
-      activeStaff,
-      shiftsCovered,
-      backlogRisk,
-      openAssignedOrders,
-    };
-  }, [orders, staffMembers]);
-
-  const coverageNotes = useMemo(() => {
-    const unassignedOrders = orders.filter((order) => !order.assignedStaff?._id && order.status !== 'delivered').length;
-    const inactiveStaff = staffMembers.filter((member) => member.isActive === false).length;
-    const overloadedStaff = staffRows.filter((member) => {
-      const workloadCount = Number.parseInt(member.workload, 10);
-      return workloadCount >= 5;
-    }).length;
-
-    return [
-      `${stats.activeStaff} active staff available for assignments today`,
-      `${unassignedOrders} open order${unassignedOrders === 1 ? '' : 's'} still need staff assignment`,
-      inactiveStaff > 0
-        ? `${inactiveStaff} staff account${inactiveStaff === 1 ? ' is' : 's are'} currently inactive`
-        : 'All staff accounts are currently active',
-      overloadedStaff > 0
-        ? `${overloadedStaff} staff member${overloadedStaff === 1 ? '' : 's'} have heavy workloads`
-        : 'No staff members are currently overloaded',
-    ];
-  }, [orders, staffMembers, staffRows, stats.activeStaff]);
-
-  const responseTiming = useMemo(() => {
-    const totalAssigned = staffRows.reduce((sum, member) => sum + member.totalAssigned, 0);
-    const completedAssignments = staffRows.reduce((sum, member) => sum + member.completedAssignments, 0);
-    const averageOpenLoad =
-      staffRows.length > 0
-        ? (
-            staffRows.reduce((sum, member) => sum + Number.parseInt(member.workload, 10), 0) /
-            staffRows.length
-          ).toFixed(1)
-        : '0.0';
-
-    return [
-      `Total assigned orders: ${totalAssigned}`,
-      `Completed assigned orders: ${completedAssignments}`,
-      `Average open workload per staff member: ${averageOpenLoad}`,
-    ];
-  }, [staffRows]);
-
-  const handleStaffInputChange = (e) => {
-    const { name, value } = e.target;
-    setStaffFormData((prev) => ({
-      ...prev,
-      [name]: name === 'email' ? value.trim().toLowerCase() : value,
-    }));
-  };
-
-  const handleCloseAddStaffModal = () => {
-    setShowAddStaffModal(false);
-    setEditingStaff(null);
-    setStaffFormData({
-      name: '',
-      email: '',
-      phone: '',
-      address: '',
-    });
-  };
+  const handleCloseModal = () => {
+    setShowStaffModal(false)
+    setEditingStaff(null)
+    setStaffFormData({ name: "", email: "", phone: "", address: "", dailyCapacity: "10" })
+  }
 
   const handleCreateStaff = async (e) => {
-    e.preventDefault();
-
+    e.preventDefault()
     if (!staffFormData.name || !staffFormData.email) {
-      toast.error('Please fill in name and email');
-      return;
+      toast.error("Please fill in name and email")
+      return
     }
-
-    setSavingStaff(true);
-
+    setSavingStaff(true)
     try {
       if (editingStaff) {
         await userAPI.update(editingStaff.id, {
-          name: staffFormData.name,
-          email: staffFormData.email,
-          phone: staffFormData.phone,
-          address: staffFormData.address,
-        });
-        toast.success('Staff member updated successfully');
-      } else {
-        await api.post('/users', {
           ...staffFormData,
-          role: 'staff',
-          password: 'temp_password_123',
-        });
-        toast.success('Staff member created successfully');
+          dailyCapacity: Number(staffFormData.dailyCapacity) || 10,
+        })
+        toast.success("Staff member updated successfully")
+      } else {
+        await api.post("/users", {
+          ...staffFormData,
+          role: "staff",
+          password: "temp_password_123",
+          dailyCapacity: Number(staffFormData.dailyCapacity) || 10,
+        })
+        toast.success("Staff member created successfully")
       }
-
-      handleCloseAddStaffModal();
-      await reloadStaffData();
+      handleCloseModal()
+      await reloadStaffData()
     } catch (error) {
-      toast.error(error.response?.data?.message || `Failed to ${editingStaff ? 'update' : 'create'} staff member`);
+      toast.error(error.response?.data?.message || "Failed to save staff member")
     } finally {
-      setSavingStaff(false);
+      setSavingStaff(false)
     }
-  };
+  }
 
   const handleEditStaff = (staff) => {
-    setEditingStaff(staff);
+    setEditingStaff(staff)
     setStaffFormData({
-      name: staff.member,
+      name: staff.name,
       email: staff.email,
-      phone: staff.phone === 'N/A' ? '' : staff.phone,
-      address: staff.address === 'No address provided' ? '' : staff.address,
-    });
-    setShowAddStaffModal(true);
-  };
+      phone: staff.phone === "N/A" ? "" : staff.phone,
+      address: staff.address === "No address provided" ? "" : staff.address,
+      dailyCapacity: String(staff.dailyCapacity ?? 10),
+    })
+    setShowStaffModal(true)
+  }
 
-  const handleDeleteStaff = async (staffId) => {
-    if (!window.confirm('Are you sure you want to delete this staff member?')) {
-      return;
-    }
-
+  const handleConfirmDelete = async () => {
+    if (!deleteStaffId) return
     try {
-      await userAPI.delete(staffId);
-      toast.success('Staff member deleted successfully');
-      await reloadStaffData();
+      await userAPI.delete(deleteStaffId)
+      toast.success("Staff member deleted successfully")
+      if (selectedStaff?.id === deleteStaffId) setSelectedStaff(null)
+      await reloadStaffData()
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to delete staff member');
+      toast.error(error.response?.data?.message || "Failed to delete staff member")
+    } finally {
+      setDeleteStaffId(null)
     }
-  };
+  }
 
-  if (user?.role !== 'admin') {
+  const columns = useMemo(
+    () => [
+      {
+        id: "name",
+        accessorKey: "name",
+        header: "Staff",
+        cell: ({ row }) => (
+          <div className="flex items-center gap-3">
+            <Avatar className="h-9 w-9">
+              <AvatarFallback className="bg-primary/10 text-xs font-semibold text-primary">
+                {getInitials(row.original.name)}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <p className="font-semibold">{row.original.name}</p>
+              <p className="text-xs text-muted-foreground">{row.original.email}</p>
+            </div>
+          </div>
+        ),
+      },
+      { accessorKey: "phone", header: "Phone" },
+      {
+        accessorKey: "availability",
+        header: "Availability",
+        cell: ({ row }) => (
+          <Badge variant={availabilityVariant(row.original.availability)}>
+            {row.original.availability}
+          </Badge>
+        ),
+      },
+      {
+        id: "status",
+        accessorFn: (row) => (row.isActive ? "active" : "inactive"),
+        header: "Status",
+        cell: ({ row }) => (
+          <StatusBadge status={row.original.isActive ? "active" : "inactive"} />
+        ),
+      },
+      {
+        accessorKey: "todayWorkloadLabel",
+        header: "Today",
+        cell: ({ row }) => (
+          <span className="font-medium">{row.original.todayWorkloadLabel}</span>
+        ),
+      },
+      { accessorKey: "activeCount", header: "Active" },
+      { accessorKey: "completedCount", header: "Completed" },
+      { accessorKey: "dailyCapacity", header: "Daily Limit" },
+      {
+        id: "actions",
+        cell: ({ row }) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setSelectedStaff(row.original)}>
+                View Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleEditStaff(row.original)}>
+                <Edit2 className="mr-2 h-4 w-4" />Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => setDeleteStaffId(row.original.id)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+      },
+    ],
+    []
+  )
+
+  if (!isAdmin) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex h-[60vh] items-center justify-center">
         <Card className="max-w-md">
           <CardContent className="py-8 text-center">
-            <h2 className="mb-2 text-2xl font-bold text-gray-900">Access Denied</h2>
-            <p className="text-gray-600">You don't have permission to access this page.</p>
+            <h2 className="mb-2 text-xl font-bold">Access Denied</h2>
+            <p className="text-muted-foreground">You don&apos;t have permission to access this page.</p>
           </CardContent>
         </Card>
       </div>
-    );
+    )
   }
 
   return (
-    <>
-      <FeatureWorkspace
-        eyebrow="Team Operations"
-        title="Staff"
-        description="Manage workforce availability, operational coverage, and team assignments without changing your current system flows."
-        tone="emerald"
-        actions={[
-          {
-            label: 'Assign Shift',
-            icon: CalendarClock,
-            onClick: () => navigate('/orders'),
-            className:
-              'rounded-2xl border-0 bg-emerald-100/80 px-5 py-3 text-slate-800 hover:bg-emerald-100',
-          },
-          {
-            label: 'Add Staff',
-            icon: UserCog,
-            variant: 'primary',
-            onClick: () => setShowAddStaffModal(true),
-            className: 'rounded-2xl bg-[#3a2fd0] px-6 py-3 hover:bg-[#2f26af]',
-          },
-        ]}
-        stats={[
-          {
-            label: 'Active Staff',
-            value: loading ? '...' : String(stats.activeStaff),
-            badge: 'Today',
-            icon: Briefcase,
-            tone: 'emerald',
-            helper: `${staffMembers.length} total staff account${staffMembers.length === 1 ? '' : 's'}`,
-          },
-          {
-            label: 'Shifts Covered',
-            value: loading ? '...' : `${stats.shiftsCovered}%`,
-            badge: 'Live',
-            icon: CalendarClock,
-            tone: 'sky',
-            helper: `${stats.openAssignedOrders} assigned order${stats.openAssignedOrders === 1 ? '' : 's'} in progress`,
-          },
-          {
-            label: 'Backlog Risk',
-            value: loading ? '...' : stats.backlogRisk,
-            badge: stats.backlogRisk === 'Low' ? 'Healthy' : 'Attention',
-            icon: ShieldCheck,
-            tone: stats.backlogRisk === 'Low' ? 'indigo' : 'amber',
-            helper: 'Based on active staff versus open assigned orders',
-          },
-        ]}
-        filters={[
-          {
-            label: 'search',
-            icon: Search,
-            content: (
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search staff, roles, shifts, or status..."
-                className="w-72 bg-transparent text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none"
-              />
-            ),
-          },
-        ]}
-        tableTitle="Staff Coverage Board"
-        tableDescription={
-          loading
-            ? 'Loading live staff coverage data...'
-            : `Showing ${staffRows.length} staff member${staffRows.length === 1 ? '' : 's'} with real assignment workload`
+    <div className="space-y-8">
+      <PageHeader
+        title="Staff Management"
+        description="Manage workforce availability and team assignments."
+        icon={Briefcase}
+        action={
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => navigate("/orders")}>
+              <CalendarClock className="mr-2 h-4 w-4" />Assign Orders
+            </Button>
+            <Button onClick={() => setShowStaffModal(true)}>
+              <UserCog className="mr-2 h-4 w-4" />Add Staff
+            </Button>
+          </div>
         }
-        columns={[
-          {
-            key: 'member',
-            label: 'Team Member',
-            render: (value, row) => (
-              <div>
-                <p className="font-semibold text-slate-900">{value}</p>
-                <p className="text-sm text-slate-500">{row.role}</p>
-              </div>
-            ),
-          },
-          { key: 'shift', label: 'Shift' },
-          { key: 'workload', label: 'Workload' },
-          {
-            key: 'status',
-            label: 'Status',
-            render: (value) => (
-              <span
-                className={`rounded-full px-3 py-1 text-sm font-medium ${
-                  value === 'On Duty'
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                {value}
-              </span>
-            ),
-          },
-          {
-            key: 'actions',
-            label: 'Actions',
-            render: (_, row) => (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleEditStaff(row)}
-                  className="rounded-xl p-2 text-slate-600 transition-colors hover:bg-slate-100"
-                >
-                  <Edit2 className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteStaff(row.id)}
-                  className="rounded-xl p-2 text-red-600 transition-colors hover:bg-red-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            ),
-          },
-        ]}
-        rows={
-          loading
-            ? [
-                {
-                  id: 'loading',
-                  member: 'Loading staff...',
-                  role: 'Fetching live staff data',
-                  shift: '...',
-                  workload: '...',
-                  status: 'Off Duty',
-                },
-              ]
-            : staffRows.length > 0
-              ? staffRows
-              : [
-                  {
-                    id: 'empty',
-                    member: 'No staff found',
-                    role: 'Create staff users to see live coverage here',
-                    shift: 'N/A',
-                    workload: '0 active orders',
-                    status: 'Off Duty',
-                  },
-                ]
-        }
-        sidePanels={[
-          {
-            title: 'Coverage Notes',
-            description: 'Quick staffing actions and reminders.',
-            content: (
-              <div className="space-y-4">
-                {(loading ? ['Preparing live staffing notes...'] : coverageNotes).map((item) => (
-                  <div key={item} className="rounded-2xl bg-[#f5fff8] p-4 text-slate-700">
-                    {item}
-                  </div>
-                ))}
-              </div>
-            ),
-          },
-          {
-            title: 'Response Timing',
-            description: 'Service readiness across active crews.',
-            content: (
-              <div className="space-y-4">
-                {(loading ? ['Calculating live workload timing...'] : responseTiming).map((item) => (
-                  <div
-                    key={item}
-                    className="flex items-center gap-3 rounded-2xl bg-[#fafaff] p-4 text-slate-700"
-                  >
-                    <TimerReset className="h-5 w-5 text-emerald-600" />
-                    {item}
-                  </div>
-                ))}
-              </div>
-            ),
-          },
-        ]}
       />
 
-      {showAddStaffModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm">
-          <Card className="w-full max-w-lg rounded-[28px] border-indigo-100 shadow-[0_30px_80px_rgba(58,47,208,0.18)]">
-            <CardHeader className="border-b border-slate-100 pb-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <CardTitle className="text-2xl">{editingStaff ? 'Edit Staff Member' : 'Add Staff Member'}</CardTitle>
-                  <CardDescription>
-                    {editingStaff
-                      ? 'Update a staff account here without affecting User Management.'
-                      : 'Create a staff account here without affecting User Management.'}
-                  </CardDescription>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="Active Staff" value={stats.activeStaff} icon={Briefcase} loading={loading} />
+        <StatCard label="Shifts Covered" value={`${stats.shiftsCovered}%`} icon={CalendarClock} loading={loading} />
+        <StatCard label="Open Assignments" value={stats.openAssigned} icon={Clock} loading={loading} />
+      </div>
+
+      <DataTable
+        columns={columns}
+        data={staffRows}
+        searchKey="name"
+        searchPlaceholder="Search staff..."
+        loading={loading}
+        emptyTitle="No staff members found"
+        emptyDescription="Add staff to get started."
+      />
+
+      <Sheet open={!!selectedStaff} onOpenChange={() => setSelectedStaff(null)}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+          {selectedStaff && (
+            <div className="space-y-6">
+              <SheetHeader>
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-14 w-14">
+                    <AvatarFallback className="bg-primary/10 text-lg font-bold text-primary">
+                      {getInitials(selectedStaff.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <SheetTitle>{selectedStaff.name}</SheetTitle>
+                    <SheetDescription>
+                      <Badge variant={availabilityVariant(selectedStaff.availability)} className="mt-1">
+                        {selectedStaff.availability}
+                      </Badge>
+                    </SheetDescription>
+                  </div>
                 </div>
-                <button
-                  onClick={handleCloseAddStaffModal}
-                  className="rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100"
-                >
-                  <X className="h-5 w-5" />
-                </button>
+              </SheetHeader>
+
+              <div className="grid grid-cols-2 gap-4">
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <CalendarClock className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase">Today</span>
+                    </div>
+                    <p className="mt-2 text-2xl font-bold">{selectedStaff.todayWorkloadLabel}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedStaff.remainingToday} slot{selectedStaff.remainingToday === 1 ? "" : "s"} left
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Clock className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase">Active</span>
+                    </div>
+                    <p className="mt-2 text-2xl font-bold">{selectedStaff.activeCount}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <CheckCircle className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase">Completed</span>
+                    </div>
+                    <p className="mt-2 text-2xl font-bold">{selectedStaff.completedCount}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Briefcase className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase">Daily Limit</span>
+                    </div>
+                    <p className="mt-2 text-2xl font-bold">{selectedStaff.dailyCapacity}</p>
+                  </CardContent>
+                </Card>
               </div>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <form onSubmit={handleCreateStaff} className="space-y-5">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Name *</label>
-                  <input
-                    type="text"
-                    name="name"
-                    value={staffFormData.name}
-                    onChange={handleStaffInputChange}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:border-[#3a2fd0] focus:outline-none focus:ring-2 focus:ring-[#3a2fd0]/15"
-                    required
-                  />
+
+              <Separator />
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <Mail className="h-4 w-4 text-muted-foreground" />
+                  {selectedStaff.email}
                 </div>
-
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Email *</label>
-                  <input
-                    type="email"
-                    name="email"
-                    value={staffFormData.email}
-                    onChange={handleStaffInputChange}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:border-[#3a2fd0] focus:outline-none focus:ring-2 focus:ring-[#3a2fd0]/15"
-                    required
-                  />
+                <div className="flex items-center gap-2 text-sm">
+                  <Phone className="h-4 w-4 text-muted-foreground" />
+                  {selectedStaff.phone}
                 </div>
-
-                <div className="grid gap-5 md:grid-cols-2">
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Phone</label>
-                    <input
-                      type="tel"
-                      name="phone"
-                      value={staffFormData.phone}
-                      onChange={handleStaffInputChange}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:border-[#3a2fd0] focus:outline-none focus:ring-2 focus:ring-[#3a2fd0]/15"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Address</label>
-                    <input
-                      type="text"
-                      name="address"
-                      value={staffFormData.address}
-                      onChange={handleStaffInputChange}
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:border-[#3a2fd0] focus:outline-none focus:ring-2 focus:ring-[#3a2fd0]/15"
-                    />
-                  </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <MapPin className="h-4 w-4 text-muted-foreground" />
+                  {selectedStaff.address}
                 </div>
-
-                <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  {editingStaff
-                    ? 'Update staff details here without affecting other accounts.'
-                    : <>New staff accounts are created with a temporary password: <span className="font-semibold">temp_password_123</span></>}
-                </p>
-
-                <div className="flex gap-4 pt-2">
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    className="flex-1 rounded-2xl bg-[#3a2fd0] py-3 hover:bg-[#2f26af]"
-                    disabled={savingStaff}
-                  >
-                    {savingStaff ? (editingStaff ? 'Saving...' : 'Creating...') : (editingStaff ? 'Update Staff' : 'Create Staff')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleCloseAddStaffModal}
-                    className="flex-1 rounded-2xl py-3"
-                  >
-                    Cancel
-                  </Button>
+                <div className="flex items-center gap-2 text-sm">
+                  <StatusBadge status={selectedStaff.isActive ? "active" : "inactive"} />
+                  <span className="text-muted-foreground">
+                    {selectedStaff.totalAssigned} total assigned order{selectedStaff.totalAssigned === 1 ? "" : "s"}
+                  </span>
                 </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-    </>
-  );
-};
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
 
-export default Staff;
+      <Dialog open={showStaffModal} onOpenChange={handleCloseModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingStaff ? "Edit Staff Member" : "Add Staff Member"}</DialogTitle>
+            <DialogDescription>
+              {editingStaff ? "Update staff account details." : "Create a new staff account."}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateStaff} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name *</Label>
+              <Input
+                value={staffFormData.name}
+                onChange={(e) => setStaffFormData((p) => ({ ...p, name: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email *</Label>
+              <Input
+                type="email"
+                value={staffFormData.email}
+                onChange={(e) => setStaffFormData((p) => ({ ...p, email: e.target.value.trim().toLowerCase() }))}
+                required
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Phone</Label>
+                <Input
+                  value={staffFormData.phone}
+                  onChange={(e) => setStaffFormData((p) => ({ ...p, phone: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Daily Order Capacity</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={staffFormData.dailyCapacity}
+                  onChange={(e) => setStaffFormData((p) => ({ ...p, dailyCapacity: e.target.value }))}
+                  placeholder="10"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Address</Label>
+              <Input
+                value={staffFormData.address}
+                onChange={(e) => setStaffFormData((p) => ({ ...p, address: e.target.value }))}
+              />
+            </div>
+            {!editingStaff && (
+              <p className="rounded-[10px] bg-muted/50 p-3 text-sm text-muted-foreground">
+                Temporary password: <span className="font-semibold">temp_password_123</span>
+              </p>
+            )}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={handleCloseModal}>Cancel</Button>
+              <Button type="submit" loading={savingStaff}>
+                {editingStaff ? "Update Staff" : "Create Staff"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!deleteStaffId} onOpenChange={() => setDeleteStaffId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Staff Member</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this staff member? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}

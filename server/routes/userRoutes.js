@@ -6,6 +6,7 @@ import {
   updateUser,
   deleteUser,
   getStaffMembers,
+  getStaffWorkload,
 } from '../controllers/userController.js';
 import { protect, authorize } from '../middleware/auth.js';
 
@@ -17,6 +18,7 @@ router.use(protect);
 router.post('/', authorize('admin'), createUser);
 router.get('/', authorize('admin'), getAllUsers);
 router.delete('/:id', authorize('admin'), deleteUser);
+router.get('/staff/workload', authorize('admin'), getStaffWorkload);
 router.get('/staff/list', getStaffMembers);
 
 // User routes

@@ -8,10 +8,11 @@ import {
 } from '../utils/notificationService.js';
 import { findUserByIdAndRole } from '../utils/userRoleService.js';
 import { findClientById } from '../utils/accountService.js';
+import { validateStaffAssignment, parseDateInput } from '../utils/staffWorkloadService.js';
 
 // Create new order
 export const createOrder = asyncHandler(async (req, res) => {
-  const { items, pickupDate, deliveryDate, deliveryNotes, userId, assignedStaff } = req.body;
+  const { items, pickupDate, deliveryDate, deliveryNotes, pickupAddress, deliveryAddress, userId, assignedStaff, paymentStatus, isUrgent } = req.body;
 
   if (!items || items.length === 0) {
     return res.status(400).json({
@@ -81,6 +82,17 @@ export const createOrder = asyncHandler(async (req, res) => {
     normalizedItems.push(normalizedItem);
   }
 
+  if (isUrgent) {
+    totalAmount *= 2;
+  }
+
+  if (!pickupAddress?.trim() || !deliveryAddress?.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Please provide pickup and delivery addresses',
+    });
+  }
+
   // Check daily order limit
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -94,7 +106,7 @@ export const createOrder = asyncHandler(async (req, res) => {
   const settings = await Settings.findOne({ key: 'dailyOrderLimit' });
   const dailyLimit = settings ? settings.value : 20;
 
-  let scheduledDate = new Date(pickupDate);
+  let scheduledDate = parseDateInput(pickupDate);
   let message = 'Order created successfully';
 
   if (ordersToday >= dailyLimit) {
@@ -147,6 +159,39 @@ export const createOrder = asyncHandler(async (req, res) => {
     }
 
     validatedAssignedStaff = staffMember._id;
+
+    const workloadCheck = await validateStaffAssignment(
+      validatedAssignedStaff,
+      scheduledDate
+    );
+
+    if (!workloadCheck.valid) {
+      return res.status(400).json({
+        success: false,
+        message: workloadCheck.message,
+        workload: workloadCheck,
+      });
+    }
+  }
+
+  let validatedPaymentStatus = 'pending';
+
+  if (paymentStatus !== undefined) {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only admins can set payment status when creating orders',
+      });
+    }
+
+    if (!['pending', 'paid', 'failed'].includes(paymentStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment status must be pending, paid, or failed',
+      });
+    }
+
+    validatedPaymentStatus = paymentStatus;
   }
 
   // Create order
@@ -156,9 +201,12 @@ export const createOrder = asyncHandler(async (req, res) => {
     items: normalizedItems,
     pickupDate: scheduledDate,
     deliveryDate: new Date(deliveryDate),
+    pickupAddress: pickupAddress.trim(),
+    deliveryAddress: deliveryAddress.trim(),
     deliveryNotes,
     totalAmount,
     assignedStaff: validatedAssignedStaff,
+    paymentStatus: validatedPaymentStatus,
   });
 
   order = await Order.findById(order._id)
@@ -262,7 +310,7 @@ export const getOrder = asyncHandler(async (req, res) => {
 
 // Update order
 export const updateOrder = asyncHandler(async (req, res) => {
-  const { status, assignedStaff, deliveryNotes, isDelivered } = req.body;
+  const { status, assignedStaff, deliveryNotes, isDelivered, paymentStatus } = req.body;
 
   let order = await Order.findById(req.params.id);
 
@@ -281,7 +329,7 @@ export const updateOrder = asyncHandler(async (req, res) => {
     });
   }
 
-  if (req.user.role === 'client' && (status || assignedStaff !== undefined || isDelivered !== undefined)) {
+  if (req.user.role === 'client' && (status || assignedStaff !== undefined || isDelivered !== undefined || paymentStatus !== undefined)) {
     return res.status(403).json({
       success: false,
       message: 'Clients can only update order notes',
@@ -316,21 +364,51 @@ export const updateOrder = asyncHandler(async (req, res) => {
     if (!assignedStaff) {
       order.assignedStaff = null;
     } else {
-      const staffMember = await findUserByIdAndRole(assignedStaff, 'staff', { isActive: true });
+      const nextStaffId = assignedStaff.toString();
+      const currentStaffId = order.assignedStaff ? order.assignedStaff.toString() : null;
 
-      if (!staffMember) {
-        return res.status(400).json({
-          success: false,
-          message: 'Selected staff member was not found',
-        });
+      if (nextStaffId !== currentStaffId) {
+        const staffMember = await findUserByIdAndRole(assignedStaff, 'staff', { isActive: true });
+
+        if (!staffMember) {
+          return res.status(400).json({
+            success: false,
+            message: 'Selected staff member was not found',
+          });
+        }
+
+        const workloadCheck = await validateStaffAssignment(
+          staffMember._id,
+          order.pickupDate,
+          order._id
+        );
+
+        if (!workloadCheck.valid) {
+          return res.status(400).json({
+            success: false,
+            message: workloadCheck.message,
+            workload: workloadCheck,
+          });
+        }
+
+        order.assignedStaff = staffMember._id;
       }
-
-      order.assignedStaff = staffMember._id;
     }
   }
 
   if (deliveryNotes !== undefined) {
     order.deliveryNotes = deliveryNotes;
+  }
+
+  if (paymentStatus !== undefined && req.user.role === 'admin') {
+    if (!['pending', 'paid', 'failed'].includes(paymentStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment status must be pending, paid, or failed',
+      });
+    }
+
+    order.paymentStatus = paymentStatus;
   }
 
   if (isDelivered && req.user.role === 'admin') {

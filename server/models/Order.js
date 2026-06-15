@@ -1,11 +1,13 @@
 import mongoose from 'mongoose';
+import Counter from './Counter.js';
 
-const generateOrderNumber = () => {
-  const now = new Date();
-  const dateString = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  const timeString = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-  return `ORD-${dateString}-${timeString}-${randomSuffix}`;
+const generateOrderNumber = async () => {
+  const counter = await Counter.findByIdAndUpdate(
+    'orderNumber',
+    { $inc: { seq: 1 } },
+    { new: true, upsert: true }
+  );
+  return String(counter.seq);
 };
 
 const orderSchema = new mongoose.Schema(
@@ -81,6 +83,16 @@ const orderSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+    pickupAddress: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    deliveryAddress: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     assignedStaff: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -120,16 +132,7 @@ orderSchema.pre('validate', async function (next) {
   }
 
   try {
-    const Order = mongoose.model('Order');
-    let orderNumber;
-    let exists = true;
-
-    while (exists) {
-      orderNumber = generateOrderNumber();
-      exists = await Order.exists({ orderNumber });
-    }
-
-    this.orderNumber = orderNumber;
+    this.orderNumber = await generateOrderNumber();
     next();
   } catch (error) {
     next(error);

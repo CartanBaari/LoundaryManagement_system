@@ -1,115 +1,118 @@
-import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { Mail, Lock, Loader } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { useState } from "react"
+import { useNavigate, Link } from "react-router-dom"
+import { motion } from "framer-motion"
+import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { z } from "zod"
+import { Mail, Lock, Sparkles } from "lucide-react"
+import { toast } from "sonner"
+import { useAuth } from "@/context/AuthContext"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 
-const Login = () => {
-  const [formData, setFormData] = useState({ email: '', password: '' });
-  const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
-  const navigate = useNavigate();
+const loginSchema = z.object({
+  email: z.string().email("Please enter a valid email"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+})
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
+export default function Login() {
+  const [loading, setLoading] = useState(false)
+  const { login } = useAuth()
+  const navigate = useNavigate()
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
+  const form = useForm({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: "", password: "" },
+  })
 
+  const onSubmit = async (data) => {
+    setLoading(true)
     try {
-      await login(formData.email, formData.password);
-      toast.success('Login successful!');
-      navigate('/dashboard');
+      await login(data.email, data.password)
+      toast.success("Welcome back!")
+      navigate("/dashboard")
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Login failed');
+      toast.error(error.response?.data?.message || "Login failed")
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#1E3A8A] via-[#38BDF8] to-[#10B981] flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="bg-white rounded-lg shadow-xl p-8">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-[#1E3A8A] mb-2">Laundary Ms</h1>
-            <p className="text-gray-600">Welcome back to your laundry management system</p>
-          </div>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#F8FAFC] p-4">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -left-32 -top-32 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
+        <div className="absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-success/10 blur-3xl" />
+      </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="relative w-full max-w-md"
+      >
+        <Card className="border-border shadow-elevated">
+          <CardHeader className="space-y-4 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-[16px] bg-primary shadow-soft">
+              <Sparkles className="h-7 w-7 text-white" />
+            </div>
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                Email Address
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                <input
-                  type="email"
-                  id="email"
+              <CardTitle className="text-2xl">Welcome to LaundryHub</CardTitle>
+              <CardDescription>Sign in to your laundry management dashboard</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField
+                  control={form.control}
                   name="email"
-                  value={formData.email}
-                  onChange={handleChange}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#38BDF8] focus:border-transparent outline-none transition-colors"
-                  placeholder="you@example.com"
-                  required
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input className="pl-9" placeholder="you@example.com" {...field} />
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
                 />
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                <input
-                  type="password"
-                  id="password"
+                <FormField
+                  control={form.control}
                   name="password"
-                  value={formData.password}
-                  onChange={handleChange}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#38BDF8] focus:border-transparent outline-none transition-colors"
-                  placeholder="••••••••"
-                  required
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Password</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input className="pl-9" type="password" placeholder="••••••••" {...field} />
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
                 />
-              </div>
-            </div>
+                <Button type="submit" className="w-full" loading={loading}>
+                  Sign In
+                </Button>
+              </form>
+            </Form>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-[#1E3A8A] to-[#38BDF8] text-white font-semibold py-2 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {loading && <Loader className="w-4 h-4 animate-spin" />}
-              {loading ? 'Logging in...' : 'Login'}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-gray-600 text-sm">
-              Don&apos;t have an account?{' '}
-              <Link to="/register" className="text-[#38BDF8] hover:text-[#1E3A8A] font-semibold">
-                Register here
+            <p className="mt-6 text-center text-sm font-medium text-muted-foreground">
+              Don&apos;t have an account?{" "}
+              <Link to="/register" className="font-semibold text-primary hover:text-primary-hover">
+                Create account
               </Link>
             </p>
-          </div>
-
-          {/* Demo credentials */}
-          {/* <div className="mt-8 p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <p className="text-xs font-medium text-gray-700 mb-2">Demo Credentials:</p>
-            <div className="space-y-1 text-xs text-gray-600">
-              <p><span className="font-semibold">Admin:</span> admin@example.com / password</p>
-              <p><span className="font-semibold">Staff:</span> staff@example.com / password</p>
-              <p><span className="font-semibold">Client:</span> client@example.com / password</p>
-            </div>
-          </div> */}
-        </div>
-      </div>
+          </CardContent>
+        </Card>
+      </motion.div>
     </div>
-  );
-};
-
-export default Login;
+  )
+}

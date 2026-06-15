@@ -17,7 +17,10 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const API_URL = import.meta.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+  const API_URL =
+    import.meta.env.VITE_API_URL ||
+    import.meta.env.REACT_APP_API_URL ||
+    '/api';
 
   // Configure axios default header
   useEffect(() => {
@@ -72,7 +75,11 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('token', response.data.token);
       return response.data;
     } catch (err) {
-      const errorMessage = err.response?.data?.message || 'Login failed';
+      const errorMessage =
+        err.response?.data?.message ||
+        (err.request && !err.response
+          ? 'Cannot reach the server. Start the backend with: cd server && npm run dev'
+          : 'Login failed');
       setError(errorMessage);
       throw err;
     }
