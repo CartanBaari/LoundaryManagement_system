@@ -6,6 +6,7 @@ import {
   updateOrder,
   deleteOrder,
   getOrderStats,
+  getDailyOrderLimitStatus,
 } from '../controllers/orderController.js';
 import { protect, authorize } from '../middleware/auth.js';
 
@@ -17,6 +18,7 @@ router.use(protect);
 router.post('/', createOrder);
 router.get('/', getOrders);
 router.get('/stats/overview', getOrderStats);
+router.get('/daily-limit/status', getDailyOrderLimitStatus);
 router.get('/:id', getOrder);
 
 // Admin and staff only

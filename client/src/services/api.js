@@ -46,6 +46,7 @@ export const orderAPI = {
   update: (id, data) => api.put(`/orders/${id}`, data),
   delete: (id) => api.delete(`/orders/${id}`),
   getStats: () => api.get('/orders/stats/overview'),
+  getDailyLimitStatus: (params) => api.get('/orders/daily-limit/status', { params }),
 };
 
 // User API endpoints
@@ -75,6 +76,10 @@ export const categoryAPI = {
 export const paymentAPI = {
   getAll: (params) => api.get('/payments', { params }),
   create: (data) => api.post('/payments', data),
+  getStats: () => api.get('/payments/stats/overview'),
+  getReports: (params) => api.get('/payments/reports/summary', { params }),
+  getInvoices: (params) => api.get('/payments/invoices', { params }),
+  getOutstanding: (params) => api.get('/payments/outstanding', { params }),
 };
 
 // Notification API endpoints

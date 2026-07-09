@@ -12,6 +12,8 @@ import {
   Phone,
   Mail,
   MapPin,
+  RefreshCw,
+  Copy,
 } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
@@ -58,7 +60,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { getInitials } from "@/lib/utils"
+import { getInitials, generateAccountPassword } from "@/lib/utils"
 
 const availabilityVariant = (availability) => {
   if (availability === "Available") return "default"
@@ -84,7 +86,34 @@ export default function Staff() {
     phone: "",
     address: "",
     dailyCapacity: "10",
+    password: generateAccountPassword(),
   })
+
+  const openCreateStaffModal = () => {
+    setEditingStaff(null)
+    setStaffFormData({
+      name: "",
+      email: "",
+      phone: "",
+      address: "",
+      dailyCapacity: "10",
+      password: generateAccountPassword(),
+    })
+    setShowStaffModal(true)
+  }
+
+  const regenerateStaffPassword = () => {
+    setStaffFormData((prev) => ({ ...prev, password: generateAccountPassword() }))
+  }
+
+  const copyStaffPassword = async () => {
+    try {
+      await navigator.clipboard.writeText(staffFormData.password)
+      toast.success("Password copied")
+    } catch {
+      toast.error("Failed to copy password")
+    }
+  }
 
   const isAdmin = user?.role === "admin"
 
@@ -160,13 +189,24 @@ export default function Staff() {
   const handleCloseModal = () => {
     setShowStaffModal(false)
     setEditingStaff(null)
-    setStaffFormData({ name: "", email: "", phone: "", address: "", dailyCapacity: "10" })
+    setStaffFormData({
+      name: "",
+      email: "",
+      phone: "",
+      address: "",
+      dailyCapacity: "10",
+      password: generateAccountPassword(),
+    })
   }
 
   const handleCreateStaff = async (e) => {
     e.preventDefault()
     if (!staffFormData.name || !staffFormData.email) {
       toast.error("Please fill in name and email")
+      return
+    }
+    if (!editingStaff && (!staffFormData.password || staffFormData.password.length < 6)) {
+      toast.error("Password must be at least 6 characters")
       return
     }
     setSavingStaff(true)
@@ -179,12 +219,15 @@ export default function Staff() {
         toast.success("Staff member updated successfully")
       } else {
         await api.post("/users", {
-          ...staffFormData,
+          name: staffFormData.name,
+          email: staffFormData.email,
+          phone: staffFormData.phone,
+          address: staffFormData.address,
           role: "staff",
-          password: "temp_password_123",
+          password: staffFormData.password,
           dailyCapacity: Number(staffFormData.dailyCapacity) || 10,
         })
-        toast.success("Staff member created successfully")
+        toast.success(`Staff member created. Password: ${staffFormData.password}`, { duration: 10000 })
       }
       handleCloseModal()
       await reloadStaffData()
@@ -323,7 +366,7 @@ export default function Staff() {
             <Button variant="outline" onClick={() => navigate("/orders")}>
               <CalendarClock className="mr-2 h-4 w-4" />Assign Orders
             </Button>
-            <Button onClick={() => setShowStaffModal(true)}>
+            <Button onClick={openCreateStaffModal}>
               <UserCog className="mr-2 h-4 w-4" />Add Staff
             </Button>
           </div>
@@ -490,9 +533,25 @@ export default function Staff() {
               />
             </div>
             {!editingStaff && (
-              <p className="rounded-[10px] bg-muted/50 p-3 text-sm text-muted-foreground">
-                Temporary password: <span className="font-semibold">temp_password_123</span>
-              </p>
+              <div className="space-y-2">
+                <Label>Password</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={staffFormData.password}
+                    onChange={(e) => setStaffFormData((p) => ({ ...p, password: e.target.value }))}
+                    required
+                  />
+                  <Button type="button" variant="outline" size="icon" onClick={regenerateStaffPassword} title="Generate new password">
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                  <Button type="button" variant="outline" size="icon" onClick={copyStaffPassword} title="Copy password">
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Auto-generated password. You can edit it or generate a new one before creating the account.
+                </p>
+              </div>
             )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={handleCloseModal}>Cancel</Button>

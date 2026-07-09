@@ -51,8 +51,8 @@ const adminSecondaryItems = [
 const staffNavItems = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
   { label: "Orders", icon: ShoppingCart, path: "/orders" },
-  { label: "Customers", icon: Users, path: "/customers" },
-  { label: "Payments", icon: CreditCard, path: "/payments" },
+  // { label: "Customers", icon: Users, path: "/customers" },
+  // { label: "Payments", icon: CreditCard, path: "/payments" },
   { label: "Settings", icon: Settings, path: "/settings" },
 ]
 
@@ -60,7 +60,7 @@ const clientNavItems = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
   { label: "Orders", icon: ShoppingCart, path: "/orders" },
   { label: "Invoices", icon: FileText, path: "/invoices" },
-  { label: "Payments", icon: CreditCard, path: "/payments" },
+  // { label: "Payments", icon: CreditCard, path: "/payments" },
   { label: "Settings", icon: Settings, path: "/settings" },
 ]
 

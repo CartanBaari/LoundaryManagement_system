@@ -15,6 +15,11 @@ const paymentSchema = new mongoose.Schema(
       unique: true,
       required: true,
     },
+    invoiceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Invoice',
+      default: null,
+    },
     orderId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Order',

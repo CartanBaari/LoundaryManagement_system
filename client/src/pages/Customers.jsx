@@ -12,6 +12,8 @@ import {
   Wallet,
   ShoppingCart,
   TrendingUp,
+  RefreshCw,
+  Copy,
 } from "lucide-react"
 import { toast } from "sonner"
 import { api, orderAPI, userAPI } from "@/services/api"
@@ -57,7 +59,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { formatCurrency, formatDate, getInitials, resolveCustomerPaymentStatus } from "@/lib/utils"
+import { formatCurrency, formatDate, getInitials, resolveCustomerPaymentStatus, generateAccountPassword } from "@/lib/utils"
 
 const tierVariant = (tier) => {
   if (tier === "VIP") return "default"
@@ -79,7 +81,33 @@ export default function Customers() {
     email: "",
     phone: "",
     address: "",
+    password: generateAccountPassword(),
   })
+
+  const openCreateCustomerModal = () => {
+    setEditingCustomer(null)
+    setCustomerFormData({
+      name: "",
+      email: "",
+      phone: "",
+      address: "",
+      password: generateAccountPassword(),
+    })
+    setShowCustomerModal(true)
+  }
+
+  const regenerateCustomerPassword = () => {
+    setCustomerFormData((prev) => ({ ...prev, password: generateAccountPassword() }))
+  }
+
+  const copyCustomerPassword = async () => {
+    try {
+      await navigator.clipboard.writeText(customerFormData.password)
+      toast.success("Password copied")
+    } catch {
+      toast.error("Failed to copy password")
+    }
+  }
 
   const reloadCustomerData = async () => {
     try {
@@ -149,7 +177,13 @@ export default function Customers() {
   const closeCustomerModal = () => {
     setShowCustomerModal(false)
     setEditingCustomer(null)
-    setCustomerFormData({ name: "", email: "", phone: "", address: "" })
+    setCustomerFormData({
+      name: "",
+      email: "",
+      phone: "",
+      address: "",
+      password: generateAccountPassword(),
+    })
   }
 
   const handleCreateCustomer = async (e) => {
@@ -158,14 +192,25 @@ export default function Customers() {
       toast.error("Please fill in name and email")
       return
     }
+    if (!editingCustomer && (!customerFormData.password || customerFormData.password.length < 6)) {
+      toast.error("Password must be at least 6 characters")
+      return
+    }
     setSavingCustomer(true)
     try {
       if (editingCustomer) {
         await userAPI.update(editingCustomer.id, customerFormData)
         toast.success("Customer updated successfully")
       } else {
-        await api.post("/users", { ...customerFormData, role: "client", password: "temp_password_123" })
-        toast.success("Customer created successfully")
+        await api.post("/users", {
+          name: customerFormData.name,
+          email: customerFormData.email,
+          phone: customerFormData.phone,
+          address: customerFormData.address,
+          role: "client",
+          password: customerFormData.password,
+        })
+        toast.success(`Customer created. Password: ${customerFormData.password}`, { duration: 10000 })
       }
       closeCustomerModal()
       await reloadCustomerData()
@@ -305,7 +350,7 @@ export default function Customers() {
             <Button variant="outline" onClick={handleExportCustomers}>
               <Download className="mr-2 h-4 w-4" />Export
             </Button>
-            <Button onClick={() => setShowCustomerModal(true)}>
+            <Button onClick={openCreateCustomerModal}>
               <UserPlus className="mr-2 h-4 w-4" />Add Customer
             </Button>
           </div>
@@ -481,9 +526,25 @@ export default function Customers() {
               </div>
             </div>
             {!editingCustomer && (
-              <p className="rounded-[10px] bg-muted/50 p-3 text-sm text-muted-foreground">
-                New accounts use temporary password: <span className="font-semibold">temp_password_123</span>
-              </p>
+              <div className="space-y-2">
+                <Label>Password</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={customerFormData.password}
+                    onChange={(e) => setCustomerFormData((p) => ({ ...p, password: e.target.value }))}
+                    required
+                  />
+                  <Button type="button" variant="outline" size="icon" onClick={regenerateCustomerPassword} title="Generate new password">
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                  <Button type="button" variant="outline" size="icon" onClick={copyCustomerPassword} title="Copy password">
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Auto-generated password. You can edit it or generate a new one before creating the account.
+                </p>
+              </div>
             )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeCustomerModal}>Cancel</Button>

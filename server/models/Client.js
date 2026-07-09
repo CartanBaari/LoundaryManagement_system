@@ -47,6 +47,11 @@ const clientSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    outstandingBalance: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
   },
   {
     timestamps: true,

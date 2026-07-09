@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { CreditCard, Plus, Wallet, TrendingUp, Receipt } from "lucide-react"
 import { toast } from "sonner"
-import { orderAPI, paymentAPI, userAPI } from "@/services/api"
+import { paymentAPI } from "@/services/api"
 import { useAuth } from "@/context/AuthContext"
 import PageHeader from "@/components/shared/PageHeader"
 import DataTable from "@/components/shared/DataTable"
@@ -36,6 +36,7 @@ const initialFormState = {
   customerName: "",
   phoneNumber: "",
   totalAmount: "",
+  alreadyPaid: "",
   amountPaid: "",
   discount: "",
   paymentMethod: "cash",
@@ -60,26 +61,36 @@ const statusLabelMap = { paid: "Paid", partial: "Partial", unpaid: "Unpaid" }
 export default function Payments() {
   const { user } = useAuth()
   const [payments, setPayments] = useState([])
-  const [orders, setOrders] = useState([])
-  const [clients, setClients] = useState([])
+  const [outstandingOptions, setOutstandingOptions] = useState([])
+  const [paymentStats, setPaymentStats] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [outstandingLoading, setOutstandingLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [showRecordModal, setShowRecordModal] = useState(false)
   const [statusFilter, setStatusFilter] = useState("all")
   const [formData, setFormData] = useState(initialFormState)
   const isAdmin = user?.role === "admin"
 
+  const loadOutstandingOptions = async () => {
+    setOutstandingLoading(true)
+    try {
+      const response = await paymentAPI.getOutstanding()
+      setOutstandingOptions(response.data?.options || [])
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to load outstanding invoices")
+      setOutstandingOptions([])
+    } finally {
+      setOutstandingLoading(false)
+    }
+  }
+
   const loadPaymentsPageData = async () => {
     setLoading(true)
     try {
-      const [paymentsResponse, ordersResponse, clientsResponse] = await Promise.all([
-        paymentAPI.getAll(),
-        orderAPI.getAll(),
-        userAPI.getAll({ role: "client" }),
-      ])
+      const requests = [paymentAPI.getAll(), paymentAPI.getStats()]
+      const [paymentsResponse, statsResponse] = await Promise.all(requests)
       setPayments(paymentsResponse.data?.payments || [])
-      setOrders((ordersResponse.data?.orders || []).filter((order) => order.userModel === "Client"))
-      setClients(clientsResponse.data?.users || [])
+      setPaymentStats(statsResponse.data?.stats || null)
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to load payments data")
     } finally {
@@ -91,29 +102,57 @@ export default function Payments() {
     if (user) loadPaymentsPageData()
   }, [user])
 
-  const filteredOrders = useMemo(() => {
-    if (!formData.clientId) return orders
-    return orders.filter((order) => order.userId?._id === formData.clientId)
-  }, [orders, formData.clientId])
+  const outstandingClients = useMemo(() => {
+    const clientMap = new Map()
+    outstandingOptions.forEach((option) => {
+      const clientKey = option.clientId?.toString?.() || option.clientId
+      if (!clientKey || clientMap.has(clientKey)) return
+      clientMap.set(clientKey, {
+        _id: clientKey,
+        name: option.customerName,
+        phone: option.phoneNumber,
+      })
+    })
+    return Array.from(clientMap.values())
+  }, [outstandingOptions])
 
-  const selectedOrder = useMemo(
-    () => orders.find((order) => order._id === formData.orderId) || null,
-    [orders, formData.orderId]
+  const filteredOutstandingOrders = useMemo(() => {
+    if (!formData.clientId) return outstandingOptions
+    return outstandingOptions.filter(
+      (option) => (option.clientId?.toString?.() || option.clientId) === formData.clientId
+    )
+  }, [outstandingOptions, formData.clientId])
+
+  const selectedOutstanding = useMemo(
+    () => outstandingOptions.find((option) => option.orderId?.toString?.() === formData.orderId || option.orderId === formData.orderId) || null,
+    [outstandingOptions, formData.orderId]
   )
 
-  const computedRemaining = useMemo(() => {
-    const totalAmount = Math.max(0, toSafeNumber(formData.totalAmount, selectedOrder?.totalAmount || 0))
-    const amountPaid = Math.max(0, toSafeNumber(formData.amountPaid, 0))
-    const discount = Math.max(0, toSafeNumber(formData.discount, 0))
-    return Math.max(0, totalAmount - amountPaid - discount)
-  }, [formData.totalAmount, formData.amountPaid, formData.discount, selectedOrder?.totalAmount])
+  const invoiceNetTotal = useMemo(() => {
+    const totalAmount = Math.max(0, toSafeNumber(formData.totalAmount, selectedOutstanding?.totalAmount || 0))
+    const discount = Math.max(0, toSafeNumber(formData.discount, selectedOutstanding?.discount || 0))
+    return Math.max(0, totalAmount - discount)
+  }, [formData.totalAmount, formData.discount, selectedOutstanding])
+
+  const currentRemaining = useMemo(() => {
+    const alreadyPaid = Math.max(0, toSafeNumber(formData.alreadyPaid, selectedOutstanding?.alreadyPaid || 0))
+    return Math.max(0, invoiceNetTotal - alreadyPaid)
+  }, [formData.alreadyPaid, invoiceNetTotal, selectedOutstanding])
+
+  const computedRemainingAfterPayment = useMemo(() => {
+    const paymentAmount = Math.max(0, toSafeNumber(formData.amountPaid, 0))
+    return Math.max(0, currentRemaining - paymentAmount)
+  }, [currentRemaining, formData.amountPaid])
 
   const computedStatus = useMemo(() => {
-    const amountPaid = Math.max(0, toSafeNumber(formData.amountPaid, 0))
-    if (amountPaid <= 0) return "unpaid"
-    if (computedRemaining <= 0) return "paid"
+    const alreadyPaid = Math.max(0, toSafeNumber(formData.alreadyPaid, selectedOutstanding?.alreadyPaid || 0))
+    const paymentAmount = Math.max(0, toSafeNumber(formData.amountPaid, 0))
+    const totalPaidAfter = alreadyPaid + paymentAmount
+
+    if (totalPaidAfter <= 0) return "unpaid"
+    if (totalPaidAfter >= invoiceNetTotal) return "paid"
     return "partial"
-  }, [computedRemaining, formData.amountPaid])
+  }, [formData.alreadyPaid, formData.amountPaid, invoiceNetTotal, selectedOutstanding])
 
   const filteredPayments = useMemo(() => {
     let filtered = payments
@@ -147,8 +186,8 @@ export default function Payments() {
   }, [payments])
 
   const totalOutstanding = useMemo(
-    () => payments.reduce((sum, p) => sum + toSafeNumber(p.remainingBalance, 0), 0),
-    [payments]
+    () => toSafeNumber(paymentStats?.totalOutstanding, 0),
+    [paymentStats]
   )
 
   const successRate = useMemo(() => {
@@ -166,13 +205,14 @@ export default function Payments() {
     resetForm()
   }
 
-  const openModal = () => {
+  const openModal = async () => {
     if (!isAdmin) {
       toast.error("Only admins can record payments")
       return
     }
     setShowRecordModal(true)
     resetForm()
+    await loadOutstandingOptions()
   }
 
   const handleInputChange = (name, value) => {
@@ -180,7 +220,7 @@ export default function Payments() {
   }
 
   const handleClientSelect = (selectedClientId) => {
-    const selectedClient = clients.find((c) => c._id === selectedClientId)
+    const selectedClient = outstandingClients.find((client) => client._id === selectedClientId)
     setFormData((prev) => ({
       ...prev,
       clientId: selectedClientId,
@@ -188,6 +228,7 @@ export default function Payments() {
       customerName: selectedClient?.name || "",
       phoneNumber: selectedClient?.phone || "",
       totalAmount: "",
+      alreadyPaid: "",
       amountPaid: "",
       discount: "",
       dueDate: "",
@@ -195,22 +236,31 @@ export default function Payments() {
     }))
   }
 
+  const applyOutstandingOption = (option) => {
+    if (!option) return
+
+    setFormData((prev) => ({
+      ...prev,
+      orderId: option.orderId?.toString?.() || option.orderId,
+      clientId: option.clientId?.toString?.() || option.clientId || prev.clientId,
+      customerName: option.customerName || prev.customerName,
+      phoneNumber: option.phoneNumber || prev.phoneNumber,
+      totalAmount: String(toSafeNumber(option.totalAmount, 0)),
+      alreadyPaid: String(toSafeNumber(option.alreadyPaid, 0)),
+      discount: String(toSafeNumber(option.discount, 0)),
+      amountPaid: "",
+    }))
+  }
+
   const handleOrderSelect = (selectedOrderId) => {
-    const order = orders.find((e) => e._id === selectedOrderId)
-    if (!order) {
+    const option = outstandingOptions.find(
+      (entry) => entry.orderId?.toString?.() === selectedOrderId || entry.orderId === selectedOrderId
+    )
+    if (!option) {
       setFormData((prev) => ({ ...prev, orderId: "" }))
       return
     }
-    setFormData((prev) => ({
-      ...prev,
-      orderId: selectedOrderId,
-      clientId: order.userId?._id || prev.clientId,
-      customerName: order.userId?.name || prev.customerName,
-      phoneNumber: order.userId?.phone || prev.phoneNumber,
-      totalAmount: String(toSafeNumber(order.totalAmount, 0)),
-      amountPaid: prev.amountPaid || "",
-      discount: prev.discount || "",
-    }))
+    applyOutstandingOption(option)
   }
 
   const handleSubmitPayment = async (e) => {
@@ -223,6 +273,24 @@ export default function Payments() {
       toast.error("Please select a client")
       return
     }
+
+    const paymentAmount = Math.max(0, toSafeNumber(formData.amountPaid, 0))
+    const discountAmount = Math.max(0, toSafeNumber(formData.discount, selectedOutstanding?.discount || 0))
+    const totalAmount = Math.max(0, toSafeNumber(formData.totalAmount, selectedOutstanding?.totalAmount || 0))
+
+    if (discountAmount > totalAmount) {
+      toast.error("Discount cannot exceed the total amount")
+      return
+    }
+    if (paymentAmount <= 0) {
+      toast.error("Payment amount must be greater than zero")
+      return
+    }
+    if (paymentAmount > currentRemaining) {
+      toast.error(`Payment cannot exceed remaining balance (${formatCurrency(currentRemaining)})`)
+      return
+    }
+
     setSubmitting(true)
     try {
       const payload = {
@@ -230,9 +298,9 @@ export default function Payments() {
         orderId: formData.orderId,
         customerName: formData.customerName.trim(),
         phoneNumber: formData.phoneNumber.trim(),
-        totalAmount: Math.max(0, toSafeNumber(formData.totalAmount, selectedOrder?.totalAmount || 0)),
-        amountPaid: Math.max(0, toSafeNumber(formData.amountPaid, 0)),
-        discount: Math.max(0, toSafeNumber(formData.discount, 0)),
+        totalAmount,
+        amountPaid: paymentAmount,
+        discount: discountAmount,
         paymentMethod: formData.paymentMethod,
         paymentDate: formData.paymentDate,
         dueDate: formData.dueDate || undefined,
@@ -338,6 +406,11 @@ export default function Payments() {
               Create a payment record with client details and settlement status.
             </DialogDescription>
           </DialogHeader>
+          {outstandingLoading ? (
+            <p className="py-8 text-center text-sm font-medium text-muted-foreground">Loading outstanding invoices...</p>
+          ) : outstandingOptions.length === 0 ? (
+            <p className="py-8 text-center text-sm font-medium text-muted-foreground">No outstanding payments found.</p>
+          ) : (
           <form onSubmit={handleSubmitPayment} className="space-y-6">
             <div className="space-y-4">
               <h3 className="text-sm font-semibold">Basic Information</h3>
@@ -347,7 +420,7 @@ export default function Payments() {
                   <Select value={formData.clientId} onValueChange={handleClientSelect}>
                     <SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger>
                     <SelectContent>
-                      {clients.map((client) => (
+                      {outstandingClients.map((client) => (
                         <SelectItem key={client._id} value={client._id}>{client.name}</SelectItem>
                       ))}
                     </SelectContent>
@@ -355,12 +428,12 @@ export default function Payments() {
                 </div>
                 <div className="space-y-2">
                   <Label>Order</Label>
-                  <Select value={formData.orderId} onValueChange={handleOrderSelect}>
+                  <Select value={formData.orderId} onValueChange={handleOrderSelect} disabled={!formData.clientId}>
                     <SelectTrigger><SelectValue placeholder="Select order" /></SelectTrigger>
                     <SelectContent>
-                      {filteredOrders.map((order) => (
-                        <SelectItem key={order._id} value={order._id}>
-                          {order.orderNumber} ({formatCurrency(order.totalAmount || 0)})
+                      {filteredOutstandingOrders.map((option) => (
+                        <SelectItem key={option.orderId} value={option.orderId?.toString?.() || option.orderId}>
+                          {option.orderNumber} ({formatCurrency(option.remainingBalance)} remaining)
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -394,19 +467,36 @@ export default function Payments() {
                     min="0"
                     step="0.01"
                     value={formData.totalAmount}
-                    onChange={(e) => handleInputChange("totalAmount", e.target.value)}
-                    required
+                    readOnly
+                    className="bg-muted"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Amount Paid</Label>
+                  <Label>Already Paid</Label>
                   <Input
                     type="number"
                     min="0"
                     step="0.01"
+                    value={formData.alreadyPaid}
+                    readOnly
+                    className="bg-muted"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Remaining Balance</Label>
+                  <Input value={currentRemaining.toFixed(2)} readOnly className="bg-muted" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Payment Amount</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max={currentRemaining}
+                    step="0.01"
                     value={formData.amountPaid}
                     onChange={(e) => handleInputChange("amountPaid", e.target.value)}
                     required
+                    disabled={!formData.orderId}
                   />
                 </div>
                 <div className="space-y-2">
@@ -414,14 +504,17 @@ export default function Payments() {
                   <Input
                     type="number"
                     min="0"
+                    max={Math.max(0, toSafeNumber(formData.totalAmount, selectedOutstanding?.totalAmount || 0))}
                     step="0.01"
                     value={formData.discount}
                     onChange={(e) => handleInputChange("discount", e.target.value)}
+                    disabled={!formData.orderId}
+                    placeholder="0.00"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Remaining Balance</Label>
-                  <Input value={computedRemaining.toFixed(2)} readOnly className="bg-muted" />
+                  <Label>Balance After Payment</Label>
+                  <Input value={computedRemainingAfterPayment.toFixed(2)} readOnly className="bg-muted" />
                 </div>
               </div>
             </div>
@@ -473,11 +566,12 @@ export default function Payments() {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeModal}>Cancel</Button>
-              <Button type="submit" loading={submitting}>
+              <Button type="submit" loading={submitting} disabled={!formData.orderId}>
                 <Receipt className="mr-2 h-4 w-4" />Record Payment
               </Button>
             </DialogFooter>
           </form>
+          )}
         </DialogContent>
       </Dialog>
     </div>

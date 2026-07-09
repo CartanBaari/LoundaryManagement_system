@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import {
   Plus,
   ShoppingCart,
+  CalendarDays,
   Send,
   MessageSquare,
   Eye,
@@ -24,6 +25,7 @@ import StatusBadge, { PaymentStatusBadge } from "@/components/shared/StatusBadge
 import OrderTimeline from "@/components/shared/OrderTimeline"
 import StatCard from "@/components/shared/StatCard"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -67,9 +69,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { formatCurrency, formatDate, formatStaffWorkloadLabel, toDateInputValue, isStaffAtCapacity } from "@/lib/utils"
+import { formatCurrency, formatDate, formatStaffWorkloadLabel, toDateInputValue, isStaffAtCapacity, buildStaffPickupDateLoadMap, getStaffCapacityForDate, getStaffRemainingCapacity } from "@/lib/utils"
+import StaffCapacityDetails from "@/components/shared/StaffCapacityDetails"
 
 const UNASSIGNED_STAFF_VALUE = "unassigned"
+const ASSIGN_STAFF_PLACEHOLDER = "select-staff"
 
 const STATUS_TABS = [
   { value: "all", label: "All" },
@@ -94,6 +98,13 @@ export default function Orders() {
   const { orders, fetchOrders, updateOrder, deleteOrder, loading } = useOrders()
   const { sendBroadcast, sendDirect } = useNotifications()
   const [statusFilter, setStatusFilter] = useState("all")
+  const [period, setPeriod] = useState("monthly")
+  const [dateRange, setDateRange] = useState(() => {
+    const end = new Date()
+    const start = new Date()
+    start.setMonth(end.getMonth() - 1)
+    return { startDate: toDateInputValue(start), endDate: toDateInputValue(end) }
+  })
   const [showCreateOrderModal, setShowCreateOrderModal] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [editingOrder, setEditingOrder] = useState(null)
@@ -153,8 +164,26 @@ export default function Orders() {
     loadStaffMembers()
   }, [isAdmin])
 
+  useEffect(() => {
+    const end = new Date()
+    const start = new Date()
+    if (period === "weekly") start.setDate(end.getDate() - 6)
+    else if (period === "monthly") start.setMonth(end.getMonth() - 1)
+    else start.setFullYear(end.getFullYear() - 1)
+    setDateRange({ startDate: toDateInputValue(start), endDate: toDateInputValue(end) })
+  }, [period])
+
+  const dateFilteredOrders = useMemo(() => {
+    const start = new Date(`${dateRange.startDate}T00:00:00`)
+    const end = new Date(`${dateRange.endDate}T23:59:59.999`)
+    return orders.filter((o) => {
+      const d = new Date(o.createdAt)
+      return d >= start && d <= end
+    })
+  }, [orders, dateRange])
+
   const filteredOrders = useMemo(() => {
-    let filtered = orders
+    let filtered = dateFilteredOrders
     if (statusFilter === "pending") {
       filtered = filtered.filter((o) => o.status === "pending")
     } else if (statusFilter === "processing") {
@@ -165,23 +194,42 @@ export default function Orders() {
       filtered = filtered.filter((o) => o.status === "cancelled")
     }
     return filtered
-  }, [orders, statusFilter])
+  }, [dateFilteredOrders, statusFilter])
 
   const stats = useMemo(() => {
-    const pending = orders.filter((o) => o.status === "pending").length
-    const processing = orders.filter((o) => PROCESSING_STATUSES.includes(o.status)).length
-    const completed = orders.filter((o) => o.status === "delivered").length
-    const cancelled = orders.filter((o) => o.status === "cancelled").length
-    return { total: orders.length, pending, processing, completed, cancelled }
-  }, [orders])
+    const pending = dateFilteredOrders.filter((o) => o.status === "pending").length
+    const processing = dateFilteredOrders.filter((o) => PROCESSING_STATUSES.includes(o.status)).length
+    const completed = dateFilteredOrders.filter((o) => o.status === "delivered").length
+    const cancelled = dateFilteredOrders.filter((o) => o.status === "cancelled").length
+    return { total: dateFilteredOrders.length, pending, processing, completed, cancelled }
+  }, [dateFilteredOrders])
+
+  const staffLoadMap = useMemo(
+    () => buildStaffPickupDateLoadMap(orders),
+    [orders]
+  )
+
+  const todayDateLabel = useMemo(() => formatDate(new Date()), [])
 
   const getStaffWorkload = (staffId) =>
     staffWorkloads.find((entry) => entry.staffId === String(staffId))
 
   const selectedStaffWorkload =
-    assignStaffId && assignStaffId !== UNASSIGNED_STAFF_VALUE
+    assignStaffId &&
+    assignStaffId !== UNASSIGNED_STAFF_VALUE &&
+    assignStaffId !== ASSIGN_STAFF_PLACEHOLDER
       ? getStaffWorkload(assignStaffId)
       : null
+
+  const currentAssignedStaffId = assigningOrder?.assignedStaff?._id
+    ? String(assigningOrder.assignedStaff._id)
+    : null
+
+  const isSameStaffAssignment =
+    Boolean(currentAssignedStaffId) &&
+    assignStaffId !== UNASSIGNED_STAFF_VALUE &&
+    assignStaffId !== ASSIGN_STAFF_PLACEHOLDER &&
+    String(assignStaffId) === currentAssignedStaffId
 
   const openEditModal = (order) => {
     setEditingOrder(order)
@@ -194,7 +242,7 @@ export default function Orders() {
 
   const openAssignModal = async (order) => {
     setAssigningOrder(order)
-    setAssignStaffId(order.assignedStaff?._id || UNASSIGNED_STAFF_VALUE)
+    setAssignStaffId(order.assignedStaff?._id ? ASSIGN_STAFF_PLACEHOLDER : UNASSIGNED_STAFF_VALUE)
     setStaffWorkloads([])
     setLoadingWorkloads(true)
     try {
@@ -263,6 +311,16 @@ export default function Orders() {
   const handleAssignOrder = async (e) => {
     e.preventDefault()
     if (!assigningOrder) return
+
+    if (assignStaffId === ASSIGN_STAFF_PLACEHOLDER) {
+      toast.error("Please select a staff member")
+      return
+    }
+
+    if (isSameStaffAssignment) {
+      toast.error("Order is already assigned to this staff member. Please select a different staff member.")
+      return
+    }
 
     if (assignStaffId !== UNASSIGNED_STAFF_VALUE && isStaffAtCapacity(selectedStaffWorkload)) {
       toast.error(
@@ -363,6 +421,29 @@ export default function Orders() {
               id: "assignedStaff",
               accessorFn: (row) => row.assignedStaff?.name || "Unassigned",
               header: "Assigned Staff",
+              cell: ({ row }) => {
+                const order = row.original
+                const staff = order.assignedStaff
+                if (!staff?.name) {
+                  return <span className="text-muted-foreground">Unassigned</span>
+                }
+
+                const load = getStaffCapacityForDate(
+                  staff._id,
+                  order.pickupDate || order.createdAt,
+                  staffLoadMap,
+                  staffMembers
+                )
+
+                return (
+                  <div className="min-w-[140px]">
+                    <p className="font-medium">{staff.name}</p>
+                    <p className={`text-xs ${load.isAtCapacity ? "font-medium text-destructive" : "text-muted-foreground"}`}>
+                      {load.assigned}/{load.capacity} assigned · {load.remaining} left
+                    </p>
+                  </div>
+                )
+              },
             },
           ]
         : []),
@@ -423,7 +504,7 @@ export default function Orders() {
         },
       },
     ],
-    [isAdmin, canEditOrders, canDeleteOrders]
+    [isAdmin, canEditOrders, canDeleteOrders, staffLoadMap, staffMembers]
   )
 
   return (
@@ -458,6 +539,32 @@ export default function Orders() {
         <StatCard label="Pending" value={stats.pending} icon={ShoppingCart} />
         <StatCard label="Processing" value={stats.processing} icon={ShoppingCart} />
         <StatCard label="Completed" value={stats.completed} icon={ShoppingCart} />
+      </div>
+
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <Tabs value={period} onValueChange={setPeriod}>
+          <TabsList>
+            <TabsTrigger value="weekly">Weekly</TabsTrigger>
+            <TabsTrigger value="monthly">Monthly</TabsTrigger>
+            <TabsTrigger value="yearly">Yearly</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div className="flex items-center gap-2">
+          <CalendarDays className="h-4 w-4 text-muted-foreground" />
+          <Input
+            type="date"
+            value={dateRange.startDate}
+            onChange={(e) => setDateRange((p) => ({ ...p, startDate: e.target.value }))}
+            className="w-auto"
+          />
+          <span className="text-sm text-muted-foreground">to</span>
+          <Input
+            type="date"
+            value={dateRange.endDate}
+            onChange={(e) => setDateRange((p) => ({ ...p, endDate: e.target.value }))}
+            className="w-auto"
+          />
+        </div>
       </div>
 
       <Tabs value={statusFilter} onValueChange={setStatusFilter}>
@@ -646,11 +753,18 @@ export default function Orders() {
           </DialogHeader>
           <form onSubmit={handleAssignOrder} className="space-y-4">
             <div className="rounded-[10px] bg-muted/50 p-3 text-sm text-muted-foreground">
-              Pickup day:{" "}
+              Received Date:{" "}
               <span className="font-semibold text-foreground">
                 {assigningOrder?.pickupDate ? formatDate(assigningOrder.pickupDate) : "Today"}
               </span>
             </div>
+            {assigningOrder?.assignedStaff?.name && (
+              <div className="rounded-[10px] border border-border bg-muted/30 p-3 text-sm">
+                Currently assigned to{" "}
+                <span className="font-semibold text-foreground">{assigningOrder.assignedStaff.name}</span>.
+                Select a different staff member to reassign.
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Staff Member</Label>
               <Select value={assignStaffId} onValueChange={setAssignStaffId} disabled={loadingWorkloads}>
@@ -658,34 +772,49 @@ export default function Orders() {
                   <SelectValue placeholder={loadingWorkloads ? "Loading workload..." : "Unassigned"} />
                 </SelectTrigger>
                 <SelectContent>
+                  {assigningOrder?.assignedStaff?._id && (
+                    <SelectItem value={ASSIGN_STAFF_PLACEHOLDER} disabled>
+                      Select a different staff member
+                    </SelectItem>
+                  )}
                   <SelectItem value={UNASSIGNED_STAFF_VALUE}>Unassigned</SelectItem>
                   {staffMembers.map((staff) => {
                     const workload = getStaffWorkload(staff._id)
                     const isFull = workload?.isAtCapacity
+                    const isCurrentAssignee = currentAssignedStaffId === String(staff._id)
                     return (
-                      <SelectItem key={staff._id} value={staff._id} disabled={isFull}>
+                      <SelectItem
+                        key={staff._id}
+                        value={staff._id}
+                        disabled={isFull || isCurrentAssignee}
+                      >
                         {formatStaffWorkloadLabel(staff.name, workload)}
-                        {isFull ? " (Full)" : ""}
+                        {isCurrentAssignee ? " (Already assigned)" : isFull ? " (Full)" : ""}
                       </SelectItem>
                     )
                   })}
                 </SelectContent>
               </Select>
-              {selectedStaffWorkload && !selectedStaffWorkload.isAtCapacity && (
-                <p className="text-sm text-muted-foreground">
-                  {selectedStaffWorkload.name} has{" "}
-                  <span className="font-semibold text-foreground">
-                    {selectedStaffWorkload.assignedCount}/{selectedStaffWorkload.dailyCapacity}
-                  </span>{" "}
-                  orders on this day
-                  {selectedStaffWorkload.remainingCapacity > 0 && (
-                    <> — {selectedStaffWorkload.remainingCapacity} slot{selectedStaffWorkload.remainingCapacity === 1 ? "" : "s"} left</>
-                  )}
+              {isSameStaffAssignment && (
+                <p className="text-sm font-medium text-destructive">
+                  This order is already assigned to this staff member. Please choose someone else.
                 </p>
+              )}
+              {selectedStaffWorkload && !selectedStaffWorkload.isAtCapacity && (
+                <StaffCapacityDetails
+                  workload={selectedStaffWorkload}
+                  dateLabel={
+                    assigningOrder?.pickupDate
+                      ? formatDate(assigningOrder.pickupDate)
+                      : todayDateLabel
+                  }
+                />
               )}
               {selectedStaffWorkload?.isAtCapacity && (
                 <p className="text-sm font-medium text-destructive">
-                  {selectedStaffWorkload.name} is at full capacity for this pickup day and cannot take more orders.
+                  {selectedStaffWorkload.name} is at full capacity (
+                  {selectedStaffWorkload.assignedCount}/{selectedStaffWorkload.dailyCapacity} assigned,{" "}
+                  {getStaffRemainingCapacity(selectedStaffWorkload)} remaining) and cannot take more orders.
                 </p>
               )}
             </div>
@@ -697,7 +826,9 @@ export default function Orders() {
                 type="submit"
                 loading={submitting}
                 disabled={
-                  assignStaffId !== UNASSIGNED_STAFF_VALUE && isStaffAtCapacity(selectedStaffWorkload)
+                  assignStaffId === ASSIGN_STAFF_PLACEHOLDER ||
+                  isSameStaffAssignment ||
+                  (assignStaffId !== UNASSIGNED_STAFF_VALUE && isStaffAtCapacity(selectedStaffWorkload))
                 }
               >
                 Assign Staff

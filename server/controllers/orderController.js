@@ -1,5 +1,4 @@
 import Order from '../models/Order.js';
-import Settings from '../models/Settings.js';
 import Service from '../models/Service.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import {
@@ -8,7 +7,13 @@ import {
 } from '../utils/notificationService.js';
 import { findUserByIdAndRole } from '../utils/userRoleService.js';
 import { findClientById } from '../utils/accountService.js';
-import { validateStaffAssignment, parseDateInput } from '../utils/staffWorkloadService.js';
+import { validateStaffAssignment } from '../utils/staffWorkloadService.js';
+import {
+  getDailyLimitStatus,
+  resolvePickupSchedule,
+  countNonUrgentOrdersForDate,
+  getDailyOrderLimit,
+} from '../utils/dailyOrderLimitService.js';
 
 // Create new order
 export const createOrder = asyncHandler(async (req, res) => {
@@ -86,34 +91,16 @@ export const createOrder = asyncHandler(async (req, res) => {
     totalAmount *= 2;
   }
 
-  if (!pickupAddress?.trim() || !deliveryAddress?.trim()) {
-    return res.status(400).json({
-      success: false,
-      message: 'Please provide pickup and delivery addresses',
-    });
-  }
-
-  // Check daily order limit
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  const ordersToday = await Order.countDocuments({
-    createdAt: { $gte: today, $lt: tomorrow },
+  const normalizedIsUrgent = Boolean(isUrgent);
+  const schedule = await resolvePickupSchedule({
+    pickupDate,
+    deliveryDate,
+    isUrgent: normalizedIsUrgent,
   });
 
-  const settings = await Settings.findOne({ key: 'dailyOrderLimit' });
-  const dailyLimit = settings ? settings.value : 20;
-
-  let scheduledDate = parseDateInput(pickupDate);
-  let message = 'Order created successfully';
-
-  if (ordersToday >= dailyLimit) {
-    // Schedule for next day
-    scheduledDate.setDate(scheduledDate.getDate() + 1);
-    message = "Today's capacity is full. Your order is scheduled for tomorrow.";
-  }
+  let scheduledDate = schedule.scheduledDate;
+  let scheduledDeliveryDate = schedule.scheduledDeliveryDate;
+  let message = schedule.message;
 
   let orderUserId = req.user._id;
   let orderUserModel = req.user.role === 'client' ? 'Client' : 'User';
@@ -200,13 +187,14 @@ export const createOrder = asyncHandler(async (req, res) => {
     userModel: orderUserModel,
     items: normalizedItems,
     pickupDate: scheduledDate,
-    deliveryDate: new Date(deliveryDate),
-    pickupAddress: pickupAddress.trim(),
-    deliveryAddress: deliveryAddress.trim(),
+    deliveryDate: scheduledDeliveryDate,
+    pickupAddress: pickupAddress?.trim() || '',
+    deliveryAddress: deliveryAddress?.trim() || '',
     deliveryNotes,
     totalAmount,
     assignedStaff: validatedAssignedStaff,
     paymentStatus: validatedPaymentStatus,
+    isUrgent: normalizedIsUrgent,
   });
 
   order = await Order.findById(order._id)
@@ -241,6 +229,7 @@ export const createOrder = asyncHandler(async (req, res) => {
   res.status(201).json({
     success: true,
     message,
+    rescheduled: schedule.rescheduled,
     order,
   });
 });
@@ -367,32 +356,37 @@ export const updateOrder = asyncHandler(async (req, res) => {
       const nextStaffId = assignedStaff.toString();
       const currentStaffId = order.assignedStaff ? order.assignedStaff.toString() : null;
 
-      if (nextStaffId !== currentStaffId) {
-        const staffMember = await findUserByIdAndRole(assignedStaff, 'staff', { isActive: true });
-
-        if (!staffMember) {
-          return res.status(400).json({
-            success: false,
-            message: 'Selected staff member was not found',
-          });
-        }
-
-        const workloadCheck = await validateStaffAssignment(
-          staffMember._id,
-          order.pickupDate,
-          order._id
-        );
-
-        if (!workloadCheck.valid) {
-          return res.status(400).json({
-            success: false,
-            message: workloadCheck.message,
-            workload: workloadCheck,
-          });
-        }
-
-        order.assignedStaff = staffMember._id;
+      if (nextStaffId === currentStaffId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order is already assigned to this staff member. Please select a different staff member.',
+        });
       }
+
+      const staffMember = await findUserByIdAndRole(assignedStaff, 'staff', { isActive: true });
+
+      if (!staffMember) {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected staff member was not found',
+        });
+      }
+
+      const workloadCheck = await validateStaffAssignment(
+        staffMember._id,
+        order.pickupDate,
+        order._id
+      );
+
+      if (!workloadCheck.valid) {
+        return res.status(400).json({
+          success: false,
+          message: workloadCheck.message,
+          workload: workloadCheck,
+        });
+      }
+
+      order.assignedStaff = staffMember._id;
     }
   }
 
@@ -479,18 +473,27 @@ export const deleteOrder = asyncHandler(async (req, res) => {
   });
 });
 
+// Get daily non-urgent order limit status for a date
+export const getDailyOrderLimitStatus = asyncHandler(async (req, res) => {
+  const { date } = req.query;
+  const status = await getDailyLimitStatus(date || new Date());
+
+  res.status(200).json({
+    success: true,
+    ...status,
+  });
+});
+
 // Get order statistics
 export const getOrderStats = asyncHandler(async (req, res) => {
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const dailyLimit = await getDailyOrderLimit();
+  const todayNonUrgentOrders = await countNonUrgentOrdersForDate(today);
 
   const stats = {
     totalOrders: await Order.countDocuments(),
-    todayOrders: await Order.countDocuments({
-      createdAt: { $gte: today, $lt: tomorrow },
-    }),
+    todayOrders: todayNonUrgentOrders,
+    dailyOrderLimit: dailyLimit,
     pendingOrders: await Order.countDocuments({ status: { $ne: 'delivered' } }),
     completedOrders: await Order.countDocuments({ status: 'delivered' }),
     totalRevenue: 0,

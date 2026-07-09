@@ -148,8 +148,11 @@ export default function Settings() {
                         value={settings.dailyOrderLimit}
                         onChange={(e) => setSettings((p) => ({ ...p, dailyOrderLimit: e.target.value }))}
                       />
-                      <span className="text-sm text-muted-foreground">orders per day</span>
+                      <span className="text-sm text-muted-foreground">non-urgent orders per day</span>
                     </div>
+                    <p className="text-sm text-muted-foreground">
+                      Urgent orders are not counted toward this limit. When the limit is reached, new non-urgent orders are automatically scheduled for the next day.
+                    </p>
                   </div>
                   <div className="flex items-center justify-between rounded-[10px] border border-border p-4">
                     <div>

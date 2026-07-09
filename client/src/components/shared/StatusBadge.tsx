@@ -40,7 +40,7 @@ export function PaymentStatusBadge({ status }: { status: string }) {
       ? "paid"
       : normalized === "failed" || normalized === "refunded"
         ? "refunded"
-        : normalized === "partial"
+        : normalized === "partial" || normalized === "partially_paid"
           ? "processing"
           : "pending"
 

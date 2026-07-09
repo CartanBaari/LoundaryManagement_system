@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { useAuth } from "@/context/AuthContext"
 import { AlertCircle, Plus, Trash2, ChevronDown } from "lucide-react"
 import { toast } from "sonner"
-import { api, serviceAPI, userAPI } from "@/services/api"
+import { api, serviceAPI, userAPI, orderAPI } from "@/services/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -30,7 +30,8 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { formatCurrency, formatStaffWorkloadLabel, isStaffAtCapacity } from "@/lib/utils"
+import { formatCurrency, formatStaffWorkloadLabel, isStaffAtCapacity, getStaffRemainingCapacity } from "@/lib/utils"
+import StaffCapacityDetails from "@/components/shared/StaffCapacityDetails"
 
 const SERVICE_TYPE_OPTIONS = [
   { value: "wash", label: "Wash" },
@@ -45,12 +46,39 @@ const formatServiceTypesLabel = (serviceTypes = []) => {
     .join(", ")
 }
 
+const addDaysToDateInput = (dateInput, days) => {
+  const date = new Date(`${dateInput}T00:00:00`)
+  date.setDate(date.getDate() + days)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+const getDateInputGapDays = (pickupDate, deliveryDate) => {
+  const pickup = new Date(`${pickupDate}T00:00:00`)
+  const delivery = new Date(`${deliveryDate}T00:00:00`)
+  return Math.max(0, Math.round((delivery.getTime() - pickup.getTime()) / 86400000))
+}
+
+const formatDateLabel = (dateInput) =>
+  new Date(`${dateInput}T00:00:00`).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  })
+
 const NewOrder = ({ isModal = false, onSuccess, onCancel }) => {
   const navigate = useNavigate()
   const { user } = useAuth()
   const isAdmin = user?.role === "admin"
   const [loading, setLoading] = useState(false)
-  const [dailyOrderCount, setDailyOrderCount] = useState(0)
+  const [dailyLimitStatus, setDailyLimitStatus] = useState({
+    limit: 20,
+    used: 0,
+    remaining: 20,
+    isFull: false,
+  })
   const [customers, setCustomers] = useState([])
   const [staffMembers, setStaffMembers] = useState([])
   const [staffWorkloads, setStaffWorkloads] = useState([])
@@ -59,33 +87,78 @@ const NewOrder = ({ isModal = false, onSuccess, onCancel }) => {
     { serviceId: "", itemType: "", serviceName: "", serviceTypes: ["wash"], quantity: 1, price: 0, category: "" },
   ])
   const [isUrgent, setIsUrgent] = useState(false)
+  const [limitBlockedDate, setLimitBlockedDate] = useState(null)
   const [formData, setFormData] = useState({
     customerId: "",
     assignedStaff: "",
     paymentStatus: "pending",
     pickupDate: new Date().toISOString().split("T")[0],
     deliveryDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-    pickupAddress: "",
-    deliveryAddress: "",
     notes: "",
   })
 
   useEffect(() => {
-    const checkDailyLimit = async () => {
+    let cancelled = false
+
+    const syncPickupSchedule = async () => {
+      if (!formData.pickupDate) return
+
       try {
-        const response = await api.get("/orders")
-        const orders = response.data?.orders || []
-        const todayOrders = orders.filter((order) => {
-          const orderDate = new Date(order.createdAt).toDateString()
-          return orderDate === new Date().toDateString()
-        })
-        setDailyOrderCount(todayOrders.length)
+        if (isUrgent) {
+          const response = await orderAPI.getDailyLimitStatus({ date: formData.pickupDate })
+          if (cancelled) return
+          setDailyLimitStatus({
+            limit: response.data?.dailyLimit ?? 20,
+            used: response.data?.used ?? 0,
+            remaining: response.data?.remaining ?? 0,
+            isFull: Boolean(response.data?.isFull),
+          })
+          setLimitBlockedDate(null)
+          return
+        }
+
+        const requestedPickup = formData.pickupDate
+        const gapDays = getDateInputGapDays(formData.pickupDate, formData.deliveryDate)
+        let pickup = requestedPickup
+
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          const response = await orderAPI.getDailyLimitStatus({ date: pickup })
+          if (cancelled) return
+
+          setDailyLimitStatus({
+            limit: response.data?.dailyLimit ?? 20,
+            used: response.data?.used ?? 0,
+            remaining: response.data?.remaining ?? 0,
+            isFull: Boolean(response.data?.isFull),
+          })
+
+          if (!response.data?.isFull) {
+            const nextDelivery = addDaysToDateInput(pickup, gapDays)
+            if (pickup !== formData.pickupDate || nextDelivery !== formData.deliveryDate) {
+              setFormData((prev) => ({
+                ...prev,
+                pickupDate: pickup,
+                deliveryDate: nextDelivery,
+              }))
+            }
+            if (pickup !== requestedPickup) {
+              setLimitBlockedDate(requestedPickup)
+            }
+            return
+          }
+
+          pickup = addDaysToDateInput(pickup, 1)
+        }
       } catch {
-        console.log("Could not fetch order count")
+        console.log("Could not fetch daily order limit")
       }
     }
-    checkDailyLimit()
-  }, [])
+
+    syncPickupSchedule()
+    return () => {
+      cancelled = true
+    }
+  }, [formData.pickupDate, isUrgent])
 
   useEffect(() => {
     const loadServices = async () => {
@@ -177,6 +250,9 @@ const NewOrder = ({ isModal = false, onSuccess, onCancel }) => {
   })
 
   const handleInputChange = (name, value) => {
+    if (name === "pickupDate") {
+      setLimitBlockedDate(null)
+    }
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
@@ -270,10 +346,6 @@ const NewOrder = ({ isModal = false, onSuccess, onCancel }) => {
       toast.error("Please choose a service and at least one service type for every item")
       return
     }
-    if (!formData.pickupAddress || !formData.deliveryAddress) {
-      toast.error("Please fill in all addresses")
-      return
-    }
     if (isAdmin && !formData.customerId) {
       toast.error("Please select a customer")
       return
@@ -297,16 +369,14 @@ const NewOrder = ({ isModal = false, onSuccess, onCancel }) => {
         items: expandItemsForSubmit(),
         pickupDate: formData.pickupDate,
         deliveryDate: formData.deliveryDate,
-        pickupAddress: formData.pickupAddress,
-        deliveryAddress: formData.deliveryAddress,
         deliveryNotes: formData.notes,
         isUrgent,
         ...(isAdmin ? { userId: formData.customerId } : {}),
         ...(isAdmin && formData.assignedStaff ? { assignedStaff: formData.assignedStaff } : {}),
         ...(isAdmin ? { paymentStatus: formData.paymentStatus } : {}),
       }
-      await api.post("/orders", orderData)
-      toast.success("Order created successfully")
+      const response = await api.post("/orders", orderData)
+      toast.success(response?.data?.message || "Order created successfully")
       if (onSuccess) onSuccess()
       else navigate("/orders")
     } catch (error) {
@@ -316,7 +386,7 @@ const NewOrder = ({ isModal = false, onSuccess, onCancel }) => {
     }
   }
 
-  const isLimitExceeded = dailyOrderCount >= 20
+  const isLimitExceeded = !isUrgent && dailyLimitStatus.isFull
   const minDate = new Date().toISOString().split("T")[0]
 
   const handleCancel = () => {
@@ -326,13 +396,37 @@ const NewOrder = ({ isModal = false, onSuccess, onCancel }) => {
 
   const formContent = (
     <div className="space-y-6">
-      {isLimitExceeded && (
+      {limitBlockedDate && !isUrgent && (
         <div className="flex gap-3 rounded-[10px] border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
           <AlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
           <div>
             <h3 className="font-semibold text-amber-900 dark:text-amber-200">Daily Limit Reached</h3>
             <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">
-              Today&apos;s orders are full (20/20). Your order will be scheduled for tomorrow.
+              {dailyLimitStatus.used}/{dailyLimitStatus.limit} non-urgent orders are already scheduled for{" "}
+              {formatDateLabel(limitBlockedDate)}. Received Date updated to {formatDateLabel(formData.pickupDate)}.
+            </p>
+          </div>
+        </div>
+      )}
+      {isLimitExceeded && !limitBlockedDate && (
+        <div className="flex gap-3 rounded-[10px] border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+          <AlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
+          <div>
+            <h3 className="font-semibold text-amber-900 dark:text-amber-200">Daily Limit Reached</h3>
+            <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">
+              {dailyLimitStatus.used}/{dailyLimitStatus.limit} non-urgent orders are already scheduled for this day.
+              Finding the next available Received Date...
+            </p>
+          </div>
+        </div>
+      )}
+      {isUrgent && dailyLimitStatus.isFull && (
+        <div className="flex gap-3 rounded-[10px] border border-primary/20 bg-primary/5 p-4">
+          <AlertCircle className="h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h3 className="font-semibold">Urgent Order</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              This urgent order will be placed today even though the daily limit ({dailyLimitStatus.limit}) is full.
             </p>
           </div>
         </div>
@@ -376,20 +470,17 @@ const NewOrder = ({ isModal = false, onSuccess, onCancel }) => {
                 </SelectContent>
               </Select>
               {selectedStaffWorkload && !selectedStaffWorkload.isAtCapacity && (
-                <p className="text-xs text-muted-foreground">
-                  {selectedStaffWorkload.name} has{" "}
-                  <span className="font-semibold text-foreground">
-                    {selectedStaffWorkload.assignedCount}/{selectedStaffWorkload.dailyCapacity}
-                  </span>{" "}
-                  orders on {formData.pickupDate}
-                  {selectedStaffWorkload.remainingCapacity > 0 && (
-                    <> — {selectedStaffWorkload.remainingCapacity} slot{selectedStaffWorkload.remainingCapacity === 1 ? "" : "s"} left</>
-                  )}
-                </p>
+                <StaffCapacityDetails
+                  workload={selectedStaffWorkload}
+                  dateLabel={formData.pickupDate}
+                  className="text-xs text-muted-foreground"
+                />
               )}
               {selectedStaffWorkload?.isAtCapacity && (
                 <p className="text-xs font-medium text-destructive">
-                  {selectedStaffWorkload.name} is at full capacity on {formData.pickupDate}.
+                  {selectedStaffWorkload.name} is at full capacity (
+                  {selectedStaffWorkload.assignedCount}/{selectedStaffWorkload.dailyCapacity} assigned,{" "}
+                  {getStaffRemainingCapacity(selectedStaffWorkload)} remaining) on {formData.pickupDate}.
                 </p>
               )}
             </div>
@@ -528,7 +619,7 @@ const NewOrder = ({ isModal = false, onSuccess, onCancel }) => {
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <Label>Pickup Date</Label>
+            <Label>Received Date</Label>
             <Input
               type="date"
               value={formData.pickupDate}
@@ -544,29 +635,6 @@ const NewOrder = ({ isModal = false, onSuccess, onCancel }) => {
               value={formData.deliveryDate}
               onChange={(e) => handleInputChange("deliveryDate", e.target.value)}
               min={minDate}
-              required
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Pickup Address</Label>
-            <Textarea
-              value={formData.pickupAddress}
-              onChange={(e) => handleInputChange("pickupAddress", e.target.value)}
-              rows={4}
-              placeholder="Enter pickup address..."
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Delivery Address</Label>
-            <Textarea
-              value={formData.deliveryAddress}
-              onChange={(e) => handleInputChange("deliveryAddress", e.target.value)}
-              rows={4}
-              placeholder="Enter delivery address..."
               required
             />
           </div>

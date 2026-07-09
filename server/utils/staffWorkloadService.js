@@ -68,7 +68,7 @@ export const validateStaffAssignment = async (staffId, pickupDate, excludeOrderI
   if (summary.isAtCapacity) {
     return {
       valid: false,
-      message: `${staff.name} already has ${assignedCount}/${dailyCapacity} orders scheduled for this day`,
+      message: `${staff.name} is at full capacity (${assignedCount}/${dailyCapacity} assigned, ${summary.remainingCapacity} remaining) for this day`,
       staffName: staff.name,
       ...summary,
     };
@@ -88,7 +88,9 @@ export const getStaffWorkloads = async (dateInput = new Date(), excludeOrderId =
     staffMembers.map(async (member) => {
       const dailyCapacity = member.dailyCapacity ?? DEFAULT_DAILY_CAPACITY;
       const assignedCount = await countStaffOrdersForDate(member._id, dateInput, excludeOrderId);
+      const todayAssignedCount = await countStaffOrdersForDate(member._id, new Date(), excludeOrderId);
       const summary = buildWorkloadSummary(assignedCount, dailyCapacity);
+      const todaySummary = buildWorkloadSummary(todayAssignedCount, dailyCapacity);
 
       return {
         staffId: member._id.toString(),
@@ -97,6 +99,9 @@ export const getStaffWorkloads = async (dateInput = new Date(), excludeOrderId =
         phone: member.phone,
         dailyCapacity,
         ...summary,
+        todayAssignedCount,
+        todayRemainingCapacity: todaySummary.remainingCapacity,
+        todayIsAtCapacity: todaySummary.isAtCapacity,
       };
     })
   );
