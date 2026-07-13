@@ -17,7 +17,12 @@ import serviceRoutes from './routes/serviceRoutes.js';
 import Service from './models/Service.js';
 import categoryRoutes from './routes/categoryRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
+import expenseRoutes from './routes/expenseRoutes.js';
+import expenseCategoryRoutes from './routes/expenseCategoryRoutes.js';
+import paymentMethodRoutes from './routes/paymentMethodRoutes.js';
 import Category from './models/Category.js';
+import ExpenseCategory from './models/ExpenseCategory.js';
+import PaymentMethod from './models/PaymentMethod.js';
 import { migrateLegacyUserRoles, upsertUserRole } from './utils/userRoleService.js';
 import { migrateLegacyClients } from './utils/accountService.js';
 
@@ -35,6 +40,8 @@ const initializeData = async () => {
   await migrateClients();
   await seedCategories();
   await seedServices();
+  await seedExpenseCategories();
+  await seedPaymentMethods();
 };
 
 // Initialize express app
@@ -67,6 +74,9 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/expenses', expenseRoutes);
+app.use('/api/expense-categories', expenseCategoryRoutes);
+app.use('/api/payment-methods', paymentMethodRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -190,6 +200,57 @@ const seedServices = async () => {
     console.log('Service seed error:', error.message);
   }
 };
+
+const seedExpenseCategories = async () => {
+  try {
+    const existing = await ExpenseCategory.countDocuments();
+    if (existing > 0) return;
+
+    await ExpenseCategory.insertMany([
+      { name: 'Detergent', slug: 'detergent', description: 'Laundry detergents and cleaning agents', status: 'active' },
+      { name: 'Softener', slug: 'softener', description: 'Fabric softeners', status: 'active' },
+      { name: 'Plastic Bags', slug: 'plastic_bags', description: 'Packaging bags for finished orders', status: 'active' },
+      { name: 'Fuel', slug: 'fuel', description: 'Fuel for delivery and generators', status: 'active' },
+      { name: 'Electricity', slug: 'electricity', description: 'Electricity utility bills', status: 'active' },
+      { name: 'Water Bill', slug: 'water_bill', description: 'Water utility bills', status: 'active' },
+      { name: 'Internet', slug: 'internet', description: 'Internet and connectivity costs', status: 'active' },
+      { name: 'Rent', slug: 'rent', description: 'Shop or facility rent', status: 'active' },
+      { name: 'Salary', slug: 'salary', description: 'Staff salaries and wages', status: 'active' },
+      { name: 'Equipment', slug: 'equipment', description: 'Laundry machines and tools', status: 'active' },
+      { name: 'Maintenance', slug: 'maintenance', description: 'Repairs and maintenance', status: 'active' },
+      { name: 'Marketing', slug: 'marketing', description: 'Advertising and promotions', status: 'active' },
+      { name: 'Transportation', slug: 'transportation', description: 'Pickup and delivery transport', status: 'active' },
+      { name: 'Office Supplies', slug: 'office_supplies', description: 'Stationery and office materials', status: 'active' },
+      { name: 'Other', slug: 'other', description: 'Miscellaneous expenses', status: 'active' },
+    ]);
+
+    console.log('Default expense categories seeded');
+  } catch (error) {
+    console.log('Expense category seed error:', error.message);
+  }
+};
+
+const seedPaymentMethods = async () => {
+  try {
+    const existing = await PaymentMethod.countDocuments();
+    if (existing > 0) return;
+
+    await PaymentMethod.insertMany([
+      { name: 'Cash', slug: 'cash', type: 'both', description: 'Cash payments', status: 'active' },
+      { name: 'EVC Plus', slug: 'evc_plus', type: 'both', description: 'Hormuud EVC Plus mobile money', status: 'active' },
+      { name: 'Zaad', slug: 'zaad', type: 'both', description: 'Zaad mobile money', status: 'active' },
+      { name: 'Sahal', slug: 'sahal', type: 'both', description: 'Sahal mobile money', status: 'active' },
+      { name: 'Edahab', slug: 'edahab', type: 'both', description: 'Edahab mobile money', status: 'active' },
+      { name: 'Bank Transfer', slug: 'bank_transfer', type: 'both', description: 'Bank account transfer', status: 'active' },
+      { name: 'Cheque', slug: 'cheque', type: 'both', description: 'Cheque payments', status: 'active' },
+    ]);
+
+    console.log('Default payment methods seeded');
+  } catch (error) {
+    console.log('Payment method seed error:', error.message);
+  }
+};
+
 const startServer = async () => {
   try {
     await connectDB();

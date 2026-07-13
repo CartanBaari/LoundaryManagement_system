@@ -45,8 +45,9 @@ export function formatPaymentStatus(status?: string) {
   const normalized = status?.toLowerCase()
   if (normalized === "paid") return "Paid"
   if (normalized === "failed") return "Failed"
-  if (normalized === "partial" || normalized === "partially_paid") return "Partial Paid"
-  if (!status || normalized === "pending" || normalized === "unpaid") return "Not Paid"
+  if (normalized === "cancelled" || normalized === "canceled") return "Cancelled"
+  if (normalized === "partial" || normalized === "partially_paid") return "Partially Paid"
+  if (!status || normalized === "pending" || normalized === "unpaid") return "Pending"
   return status
 }
 

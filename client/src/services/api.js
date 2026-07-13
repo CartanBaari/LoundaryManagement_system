@@ -75,11 +75,37 @@ export const categoryAPI = {
 
 export const paymentAPI = {
   getAll: (params) => api.get('/payments', { params }),
+  getById: (id) => api.get(`/payments/${id}`),
   create: (data) => api.post('/payments', data),
+  update: (id, data) => api.put(`/payments/${id}`, data),
+  delete: (id) => api.delete(`/payments/${id}`),
   getStats: () => api.get('/payments/stats/overview'),
   getReports: (params) => api.get('/payments/reports/summary', { params }),
   getInvoices: (params) => api.get('/payments/invoices', { params }),
   getOutstanding: (params) => api.get('/payments/outstanding', { params }),
+};
+
+export const expenseAPI = {
+  getAll: (params) => api.get('/expenses', { params }),
+  getById: (id) => api.get(`/expenses/${id}`),
+  getStats: () => api.get('/expenses/stats/overview'),
+  create: (data) => api.post('/expenses', data),
+  update: (id, data) => api.put(`/expenses/${id}`, data),
+  delete: (id) => api.delete(`/expenses/${id}`),
+};
+
+export const expenseCategoryAPI = {
+  getAll: (params) => api.get('/expense-categories', { params }),
+  create: (data) => api.post('/expense-categories', data),
+  update: (id, data) => api.put(`/expense-categories/${id}`, data),
+  delete: (id) => api.delete(`/expense-categories/${id}`),
+};
+
+export const paymentMethodAPI = {
+  getAll: (params) => api.get('/payment-methods', { params }),
+  create: (data) => api.post('/payment-methods', data),
+  update: (id, data) => api.put(`/payment-methods/${id}`, data),
+  delete: (id) => api.delete(`/payment-methods/${id}`),
 };
 
 // Notification API endpoints

@@ -20,12 +20,15 @@ import {
   Activity,
   CheckCircle2,
   UserPlus,
+  Wallet,
+  CalendarRange,
 } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
 import { useOrders } from "@/hooks/useOrders"
 import { useNotifications } from "@/hooks/useNotifications"
-import { paymentAPI, userAPI } from "@/services/api"
+import { expenseAPI, paymentAPI, userAPI } from "@/services/api"
+import { subscribeFinanceUpdated } from "@/lib/financeEvents"
 import StatCard from "@/components/shared/StatCard"
 import PageHeader from "@/components/shared/PageHeader"
 import StatusBadge from "@/components/shared/StatusBadge"
@@ -510,6 +513,7 @@ function AdminClientDashboard() {
   const { orders, fetchOrders, loading } = useOrders()
   const [customers, setCustomers] = useState([])
   const [paymentStats, setPaymentStats] = useState(null)
+  const [expenseStats, setExpenseStats] = useState(null)
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [statsLoading, setStatsLoading] = useState(true)
 
@@ -523,15 +527,17 @@ function AdminClientDashboard() {
         await fetchOrders(params)
 
         if (user?.role === "admin") {
-          const paymentStatsResponse = await paymentAPI.getStats()
+          const [paymentStatsResponse, expenseStatsResponse, customersResponse] = await Promise.all([
+            paymentAPI.getStats(),
+            expenseAPI.getStats(),
+            userAPI.getAll({ role: "client" }),
+          ])
           setPaymentStats(paymentStatsResponse.data?.stats || null)
+          setExpenseStats(expenseStatsResponse.data?.stats || null)
+          setCustomers(customersResponse.data?.users || [])
         } else {
           setPaymentStats(null)
-        }
-
-        if (user?.role === "admin") {
-          const response = await userAPI.getAll({ role: "client" })
-          setCustomers(response.data?.users || [])
+          setExpenseStats(null)
         }
       } catch {
         toast.error("Failed to load dashboard data")
@@ -540,7 +546,26 @@ function AdminClientDashboard() {
       }
     }
 
-    if (user) loadData()
+    if (!user) return undefined
+
+    loadData()
+
+    // Keep dashboard expense/income cards in sync after Payments mutations
+    const unsubscribe = subscribeFinanceUpdated(() => {
+      if (user?.role === "admin") loadData()
+    })
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && user?.role === "admin") {
+        loadData()
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible)
+
+    return () => {
+      unsubscribe()
+      document.removeEventListener("visibilitychange", onVisible)
+    }
   }, [user, fetchOrders])
 
   const stats = useMemo(() => {
@@ -583,8 +608,11 @@ function AdminClientDashboard() {
       todayRevenue,
       orderChange: calculatePercentageChange(recentOrders.length, prevWeekOrders.length),
       revenueChange,
+      dailyExpense: expenseStats?.dailyExpense || 0,
+      monthlyExpense: expenseStats?.monthlyExpense || 0,
+      totalExpense: expenseStats?.totalExpense || 0,
     }
-  }, [orders, customers, paymentStats])
+  }, [orders, customers, paymentStats, expenseStats])
 
   const getGreeting = () => {
     const hour = new Date().getHours()
@@ -604,14 +632,37 @@ function AdminClientDashboard() {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-6">
         <StatCard icon={ShoppingCart} label="Total Orders" value={stats.totalOrders} change={stats.orderChange} loading={loading || statsLoading} />
-        <StatCard icon={DollarSign} label="Revenue" value={formatCurrency(stats.revenue)} change={stats.revenueChange} loading={loading || statsLoading} />
+        <StatCard icon={DollarSign} label="Income" value={formatCurrency(stats.revenue)} change={stats.revenueChange} loading={loading || statsLoading} />
         {user?.role === "admin" && (
           <StatCard icon={Users} label="Customers" value={stats.customers} loading={loading || statsLoading} />
         )}
         <StatCard icon={Clock} label="Pending Orders" value={stats.pendingOrders} loading={loading || statsLoading} />
         <StatCard icon={CheckCircle} label="Completed Orders" value={stats.completedOrders} loading={loading || statsLoading} />
-        <StatCard icon={TrendingUp} label="Today's Revenue" value={formatCurrency(stats.todayRevenue)} loading={loading || statsLoading} />
+        <StatCard icon={TrendingUp} label="Today's Income" value={formatCurrency(stats.todayRevenue)} loading={loading || statsLoading} />
       </div>
+
+      {user?.role === "admin" && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <StatCard
+            icon={CalendarDays}
+            label="Daily Expense"
+            value={formatCurrency(stats.dailyExpense)}
+            loading={loading || statsLoading}
+          />
+          <StatCard
+            icon={CalendarRange}
+            label="Monthly Expense"
+            value={formatCurrency(stats.monthlyExpense)}
+            loading={loading || statsLoading}
+          />
+          <StatCard
+            icon={Wallet}
+            label="Total Expense"
+            value={formatCurrency(stats.totalExpense)}
+            loading={loading || statsLoading}
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
@@ -672,6 +723,9 @@ function AdminClientDashboard() {
               <>
                 <Button variant="outline" className="w-full justify-start" asChild>
                   <Link to="/customers"><Users className="mr-2 h-4 w-4" />View Customers</Link>
+                </Button>
+                <Button variant="outline" className="w-full justify-start" asChild>
+                  <Link to="/payments"><Wallet className="mr-2 h-4 w-4" />Manage Expenses</Link>
                 </Button>
                 <Button variant="outline" className="w-full justify-start" asChild>
                   <Link to="/reports"><TrendingUp className="mr-2 h-4 w-4" />View Reports</Link>

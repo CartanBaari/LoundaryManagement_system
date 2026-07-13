@@ -8,6 +8,8 @@ import {
   CalendarDays,
   FileSpreadsheet,
   CheckCircle2,
+  MoreHorizontal,
+  MessageCircle,
 } from "lucide-react"
 import { toast } from "sonner"
 import { paymentAPI } from "@/services/api"
@@ -23,6 +25,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -57,6 +60,101 @@ const escapeCsvValue = (value) => {
     return `"${stringValue.replace(/"/g, '""')}"`
   }
   return stringValue
+}
+
+const toWhatsAppNumber = (phone) => {
+  if (!phone || phone === "N/A") return null
+  const digits = String(phone).replace(/\D/g, "")
+  if (!digits) return null
+  if (digits.startsWith("252")) return digits
+  if (digits.startsWith("0")) return `252${digits.slice(1)}`
+  if (digits.length === 9) return `252${digits}`
+  return digits
+}
+
+const buildInvoiceShareMessage = (row) => {
+  const lines = [
+    `*LaundryHub Invoice*`,
+    `Invoice: ${row.invoiceNumber || "N/A"}`,
+    `Order: ${row.orderNumber || "N/A"}`,
+    `Customer: ${row.customerName || "N/A"}`,
+    `Total: ${formatCurrency(row.totalAmount || 0)}`,
+    `Paid: ${formatCurrency(row.paidAmount || 0)}`,
+    `Due: ${formatCurrency(row.dueAmount || 0)}`,
+    `Status: ${row.status || "N/A"}`,
+    `Date: ${formatDateTime(row.createdAt)}`,
+    "",
+    "Please find your invoice details above. A PDF copy can be attached from your device.",
+  ]
+  return lines.join("\n")
+}
+
+const buildInvoicePrintHtml = (row) => {
+  const items = row.order?.items || []
+  const itemsHtml = items.length
+    ? items
+        .map(
+          (item) => `
+      <tr>
+        <td>${item.serviceName || item.itemType || "Item"}</td>
+        <td>${item.quantity ?? 1}</td>
+        <td style="text-align:right">${formatCurrency(item.price || 0)}</td>
+      </tr>`
+        )
+        .join("")
+    : `<tr><td colspan="3">No line items</td></tr>`
+
+  return `
+    <html>
+      <head>
+        <title>${row.invoiceNumber || "Invoice"}</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #111827; padding: 32px; }
+          h1 { margin: 0 0 4px; font-size: 22px; }
+          .muted { color: #6b7280; font-size: 13px; }
+          .header { display: flex; justify-content: space-between; margin-bottom: 24px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+          th, td { border-bottom: 1px solid #e5e7eb; padding: 10px 8px; text-align: left; font-size: 13px; }
+          th { background: #f8fafc; text-transform: uppercase; font-size: 11px; color: #6b7280; }
+          .totals { margin-top: 20px; width: 280px; margin-left: auto; }
+          .totals div { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+          .totals .grand { font-weight: 700; font-size: 16px; border-top: 1px solid #e5e7eb; margin-top: 8px; padding-top: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1>LaundryHub</h1>
+            <p class="muted">Professional Laundry Services</p>
+          </div>
+          <div style="text-align:right">
+            <strong>${row.invoiceNumber || ""}</strong>
+            <p class="muted">${formatDateTime(row.createdAt)}</p>
+            <p class="muted">Order: ${row.orderNumber || "N/A"}</p>
+          </div>
+        </div>
+        <div>
+          <p class="muted" style="margin-bottom:4px">BILL TO</p>
+          <strong>${row.customerName || "N/A"}</strong>
+          <p class="muted">${row.customerPhone || ""}</p>
+          <p class="muted">${row.customerEmail || ""}</p>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Item</th><th>Qty</th><th style="text-align:right">Price</th></tr>
+          </thead>
+          <tbody>${itemsHtml}</tbody>
+        </table>
+        <div class="totals">
+          <div><span>Subtotal</span><span>${formatCurrency(row.totalAmount || 0)}</span></div>
+          <div><span>Discount</span><span>${formatCurrency(row.discount || 0)}</span></div>
+          <div><span>Paid</span><span>${formatCurrency(row.paidAmount || 0)}</span></div>
+          <div><span>Due</span><span>${formatCurrency(row.dueAmount || 0)}</span></div>
+          <div class="grand"><span>Total</span><span>${formatCurrency(row.totalAmount || 0)}</span></div>
+        </div>
+      </body>
+    </html>
+  `
 }
 
 export default function Invoices() {
@@ -104,15 +202,47 @@ export default function Invoices() {
     setSelectedInvoice(row)
   }
 
+  const openPrintWindow = (row) => {
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=900,height=700")
+    if (!printWindow) {
+      toast.error("Unable to open print window. Please allow pop-ups.")
+      return null
+    }
+    printWindow.document.write(buildInvoicePrintHtml(row))
+    printWindow.document.close()
+    printWindow.focus()
+    return printWindow
+  }
+
   const handlePrint = (row) => {
-    openInvoice(row)
-    window.setTimeout(() => window.print(), 300)
+    const printWindow = openPrintWindow(row)
+    if (!printWindow) return
+    window.setTimeout(() => printWindow.print(), 300)
   }
 
   const handleDownloadPdf = (row) => {
-    openInvoice(row)
+    const printWindow = openPrintWindow(row)
+    if (!printWindow) return
     toast.info("Use the print dialog and choose Save as PDF")
-    window.setTimeout(() => window.print(), 300)
+    window.setTimeout(() => printWindow.print(), 300)
+  }
+
+  const handleShareWhatsApp = (row) => {
+    const phone = toWhatsAppNumber(row.customerPhone)
+    const message = encodeURIComponent(buildInvoiceShareMessage(row))
+    const url = phone
+      ? `https://wa.me/${phone}?text=${message}`
+      : `https://wa.me/?text=${message}`
+
+    // Open printable invoice so user can Save as PDF and attach in WhatsApp
+    openPrintWindow(row)
+    window.open(url, "_blank", "noopener,noreferrer")
+
+    toast.success(
+      phone
+        ? "WhatsApp opened — save the invoice as PDF and attach it in the chat"
+        : "WhatsApp opened — choose a contact, then attach the PDF invoice"
+    )
   }
 
   const handleMarkAsPaid = async (row) => {
@@ -222,39 +352,64 @@ export default function Invoices() {
       {
         accessorKey: "invoiceNumber",
         header: "Invoice #",
-        cell: ({ row }) => <span className="font-semibold">{row.original.invoiceNumber}</span>,
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap font-semibold text-[#111827]">
+            {row.original.invoiceNumber}
+          </span>
+        ),
       },
       {
         accessorKey: "orderNumber",
         header: "Order ID",
-        cell: ({ row }) => <span className="font-medium">{row.original.orderNumber || "N/A"}</span>,
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap text-muted-foreground">
+            {row.original.orderNumber || "N/A"}
+          </span>
+        ),
       },
       {
         accessorKey: "customerName",
         header: "Customer",
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap font-medium">{row.original.customerName || "N/A"}</span>
+        ),
       },
       {
         accessorKey: "customerPhone",
-        header: "Customer Phone",
-        cell: ({ row }) => row.original.customerPhone || "N/A",
+        header: "Phone",
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap text-muted-foreground">
+            {row.original.customerPhone || "N/A"}
+          </span>
+        ),
       },
       {
         accessorKey: "totalAmount",
         header: "Total",
-        cell: ({ row }) => formatCurrency(row.original.totalAmount || 0),
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap font-semibold">
+            {formatCurrency(row.original.totalAmount || 0)}
+          </span>
+        ),
       },
       {
         accessorKey: "paidAmount",
-        header: "Paid Amount",
+        header: "Paid",
         cell: ({ row }) => (
-          <span className="font-medium text-success">{formatCurrency(row.original.paidAmount || 0)}</span>
+          <span className="whitespace-nowrap font-medium text-emerald-600">
+            {formatCurrency(row.original.paidAmount || 0)}
+          </span>
         ),
       },
       {
         accessorKey: "dueAmount",
-        header: "Due Amount",
+        header: "Due",
         cell: ({ row }) => (
-          <span className={row.original.dueAmount > 0 ? "font-medium text-destructive" : "font-medium"}>
+          <span
+            className={`whitespace-nowrap font-medium ${
+              row.original.dueAmount > 0 ? "text-rose-600" : "text-muted-foreground"
+            }`}
+          >
             {formatCurrency(row.original.dueAmount || 0)}
           </span>
         ),
@@ -266,53 +421,70 @@ export default function Invoices() {
       },
       {
         accessorKey: "createdAt",
-        header: "Date & Time",
-        cell: ({ row }) => formatDateTime(row.original.createdAt),
+        header: "Date",
+        cell: ({ row }) => (
+          <div className="whitespace-nowrap leading-tight">
+            <p className="font-medium">{formatDate(row.original.createdAt)}</p>
+            <p className="text-xs text-muted-foreground">
+              {new Date(row.original.createdAt).toLocaleTimeString("en-US", {
+                hour: "numeric",
+                minute: "2-digit",
+                hour12: true,
+              })}
+            </p>
+          </div>
+        ),
       },
       {
         id: "actions",
-        header: "Actions",
+        header: "",
+        enableHiding: false,
         cell: ({ row }) => {
           const invoiceRow = row.original
           const isBusy = actionLoadingId === invoiceRow.id
 
           return (
-            <div className="flex flex-wrap items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                title="View"
-                onClick={() => openInvoice(invoiceRow)}
-              >
-                <Eye className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                title="Print"
-                onClick={() => handlePrint(invoiceRow)}
-              >
-                <Printer className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                title="Download PDF"
-                onClick={() => handleDownloadPdf(invoiceRow)}
-              >
-                <Download className="h-4 w-4" />
-              </Button>
-              {isAdmin && invoiceRow.status !== "paid" && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  title="Mark as Paid"
-                  disabled={isBusy}
-                  onClick={() => handleMarkAsPaid(invoiceRow)}
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-                </Button>
-              )}
+            <div className="flex justify-end">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    disabled={isBusy}
+                    aria-label="Invoice actions"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={() => openInvoice(invoiceRow)}>
+                    <Eye className="mr-2 h-4 w-4" />
+                    View
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handlePrint(invoiceRow)}>
+                    <Printer className="mr-2 h-4 w-4" />
+                    Print
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleDownloadPdf(invoiceRow)}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Download PDF
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleShareWhatsApp(invoiceRow)}>
+                    <MessageCircle className="mr-2 h-4 w-4" />
+                    Share WhatsApp
+                  </DropdownMenuItem>
+                  {isAdmin && invoiceRow.status !== "paid" && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => handleMarkAsPaid(invoiceRow)}>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Mark as Paid
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )
         },
@@ -324,10 +496,10 @@ export default function Invoices() {
   const selectedOrder = selectedInvoice?.order
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <PageHeader
         title="Invoices"
-        description="Professional invoices with payment tracking and export tools."
+        description="Track invoice payments, print receipts, and share with customers."
         icon={FileText}
         action={
           <DropdownMenu>
@@ -351,49 +523,47 @@ export default function Invoices() {
         }
       />
 
-      <Card className="p-4">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <Tabs value={statusFilter} onValueChange={setStatusFilter}>
-              <TabsList className="h-auto flex-wrap">
-                {STATUS_TABS.map((tab) => (
-                  <TabsTrigger key={tab.value} value={tab.value}>
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
+      <Card className="rounded-[16px] border-border p-4 shadow-soft">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <Tabs value={statusFilter} onValueChange={setStatusFilter}>
+            <TabsList className="h-auto flex-wrap">
+              {STATUS_TABS.map((tab) => (
+                <TabsTrigger key={tab.value} value={tab.value}>
+                  {tab.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="relative min-w-[240px] flex-1 sm:max-w-sm">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder="Search invoice #, order ID, customer, phone..."
-                  className="pl-9"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <Input
-                  type="date"
-                  value={dateRange.startDate}
-                  onChange={(event) =>
-                    setDateRange((current) => ({ ...current, startDate: event.target.value }))
-                  }
-                  className="w-auto"
-                />
-                <span className="text-sm text-muted-foreground">to</span>
-                <Input
-                  type="date"
-                  value={dateRange.endDate}
-                  onChange={(event) =>
-                    setDateRange((current) => ({ ...current, endDate: event.target.value }))
-                  }
-                  className="w-auto"
-                />
-              </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative min-w-[240px] flex-1 sm:max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search invoice, order, customer..."
+                className="pl-9"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <Input
+                type="date"
+                value={dateRange.startDate}
+                onChange={(event) =>
+                  setDateRange((current) => ({ ...current, startDate: event.target.value }))
+                }
+                className="w-auto"
+              />
+              <span className="text-sm text-muted-foreground">to</span>
+              <Input
+                type="date"
+                value={dateRange.endDate}
+                onChange={(event) =>
+                  setDateRange((current) => ({ ...current, endDate: event.target.value }))
+                }
+                className="w-auto"
+              />
             </div>
           </div>
         </div>
@@ -485,13 +655,17 @@ export default function Invoices() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <PaymentStatusBadge status={selectedInvoice.status} />
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" onClick={() => window.print()}>
+                  <Button variant="outline" size="sm" onClick={() => handlePrint(selectedInvoice)}>
                     <Printer className="mr-2 h-4 w-4" />
                     Print
                   </Button>
-                  <Button size="sm" onClick={() => handleDownloadPdf(selectedInvoice)}>
+                  <Button variant="outline" size="sm" onClick={() => handleDownloadPdf(selectedInvoice)}>
                     <Download className="mr-2 h-4 w-4" />
-                    Download PDF
+                    PDF
+                  </Button>
+                  <Button size="sm" onClick={() => handleShareWhatsApp(selectedInvoice)}>
+                    <MessageCircle className="mr-2 h-4 w-4" />
+                    WhatsApp
                   </Button>
                   {isAdmin && selectedInvoice.status !== "paid" && (
                     <Button
@@ -500,7 +674,7 @@ export default function Invoices() {
                       onClick={() => handleMarkAsPaid(selectedInvoice)}
                     >
                       <CheckCircle2 className="mr-2 h-4 w-4" />
-                      Mark as Paid
+                      Mark Paid
                     </Button>
                   )}
                 </div>

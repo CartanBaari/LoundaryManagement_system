@@ -14,6 +14,9 @@ const statusMap: Record<string, BadgeProps["variant"]> = {
   refunded: "refunded",
   active: "success",
   inactive: "secondary",
+  unpaid: "pending",
+  partial: "processing",
+  partially_paid: "processing",
 }
 
 interface StatusBadgeProps {
@@ -38,7 +41,7 @@ export function PaymentStatusBadge({ status }: { status: string }) {
   const variant =
     normalized === "paid" || normalized === "completed"
       ? "paid"
-      : normalized === "failed" || normalized === "refunded"
+      : normalized === "failed" || normalized === "refunded" || normalized === "cancelled" || normalized === "canceled"
         ? "refunded"
         : normalized === "partial" || normalized === "partially_paid"
           ? "processing"

@@ -1,11 +1,13 @@
 import Payment from '../models/Payment.js';
 import { asyncHandler } from '../middleware/errorHandler.js';
 import {
+  deletePaymentRecord,
   getInvoices,
   getOutstandingPaymentOptions,
   getPaymentOverviewStats,
   getPaymentReportSummary,
   recordPayment,
+  updatePaymentRecord,
 } from '../utils/paymentService.js';
 
 export const getPayments = asyncHandler(async (req, res) => {
@@ -32,8 +34,10 @@ export const getPayments = asyncHandler(async (req, res) => {
   if (search) {
     filter.$or = [
       { paymentId: { $regex: search, $options: 'i' } },
+      { transactionNumber: { $regex: search, $options: 'i' } },
       { customerName: { $regex: search, $options: 'i' } },
       { phoneNumber: { $regex: search, $options: 'i' } },
+      { referenceNumber: { $regex: search, $options: 'i' } },
     ];
   }
 
@@ -67,6 +71,32 @@ export const getPayments = asyncHandler(async (req, res) => {
   });
 });
 
+export const getPaymentById = asyncHandler(async (req, res) => {
+  const payment = await Payment.findById(req.params.id)
+    .populate('invoiceId', 'invoiceNumber paidAmount remainingAmount status totalAmount discount')
+    .populate({
+      path: 'orderId',
+      select: 'orderNumber totalAmount paymentStatus status userId userModel',
+      populate: {
+        path: 'userId',
+        select: 'name phone email',
+      },
+    })
+    .populate('clientId', 'name phone email outstandingBalance');
+
+  if (!payment) {
+    return res.status(404).json({
+      success: false,
+      message: 'Payment not found',
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    payment,
+  });
+});
+
 export const createPayment = asyncHandler(async (req, res) => {
   const payment = await recordPayment(req.body);
 
@@ -86,6 +116,25 @@ export const createPayment = asyncHandler(async (req, res) => {
     success: true,
     message: 'Payment recorded successfully',
     payment: populatedPayment,
+  });
+});
+
+export const updatePayment = asyncHandler(async (req, res) => {
+  const payment = await updatePaymentRecord(req.params.id, req.body);
+
+  res.status(200).json({
+    success: true,
+    message: 'Payment updated successfully',
+    payment,
+  });
+});
+
+export const deletePayment = asyncHandler(async (req, res) => {
+  await deletePaymentRecord(req.params.id);
+
+  res.status(200).json({
+    success: true,
+    message: 'Payment deleted successfully',
   });
 });
 

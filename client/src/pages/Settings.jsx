@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react"
-import { Lock, Bell, Save, Settings as SettingsIcon } from "lucide-react"
+import { Lock, Bell, Save, Settings as SettingsIcon, FolderOpen, CreditCard } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
 import { api } from "@/services/api"
 import PageHeader from "@/components/shared/PageHeader"
+import ExpenseCategoriesSettings from "@/components/settings/ExpenseCategoriesSettings"
+import PaymentMethodsSettings from "@/components/settings/PaymentMethodsSettings"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -12,10 +14,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getInitials } from "@/lib/utils"
 
 export default function Settings() {
   const { user } = useAuth()
+  const isAdmin = user?.role === "admin"
   const [loading, setLoading] = useState(false)
   const [settings, setSettings] = useState({
     dailyOrderLimit: 20,
@@ -91,131 +95,187 @@ export default function Settings() {
     <div className="space-y-8">
       <PageHeader
         title="Settings"
-        description="Manage your account and system preferences."
+        description="Manage your account, system preferences, and payment configuration."
         icon={SettingsIcon}
       />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <CardContent className="flex flex-col items-center p-6 text-center">
-            <Avatar className="h-20 w-20">
-              <AvatarFallback className="bg-primary text-xl">{getInitials(user?.name)}</AvatarFallback>
-            </Avatar>
-            <h3 className="mt-4 text-lg font-bold">{user?.name}</h3>
-            <p className="text-sm text-muted-foreground">{user?.email}</p>
-            <Badge className="mt-2 capitalize">{user?.role}</Badge>
-            <Separator className="my-4" />
-            <div className="w-full space-y-3 text-left text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Phone</span>
-                <span className="font-medium">{user?.phone || "N/A"}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <Tabs defaultValue="general" className="space-y-6">
+        <TabsList className="h-auto flex-wrap">
+          <TabsTrigger value="general">General</TabsTrigger>
+          {isAdmin && (
+            <>
+              <TabsTrigger value="expense-categories" className="gap-2">
+                <FolderOpen className="h-4 w-4" />
+                Expense Categories
+              </TabsTrigger>
+              <TabsTrigger value="payment-methods" className="gap-2">
+                <CreditCard className="h-4 w-4" />
+                Payment Methods
+              </TabsTrigger>
+            </>
+          )}
+        </TabsList>
 
-        <div className="space-y-6 lg:col-span-2">
-          {user?.role === "admin" && (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-primary/10">
-                    <Bell className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle>System Settings</CardTitle>
-                    <CardDescription>Configure system-wide preferences</CardDescription>
+        <TabsContent value="general" className="space-y-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <Card className="lg:col-span-1">
+              <CardContent className="flex flex-col items-center p-6 text-center">
+                <Avatar className="h-20 w-20">
+                  <AvatarFallback className="bg-primary text-xl">{getInitials(user?.name)}</AvatarFallback>
+                </Avatar>
+                <h3 className="mt-4 text-lg font-bold">{user?.name}</h3>
+                <p className="text-sm text-muted-foreground">{user?.email}</p>
+                <Badge className="mt-2 capitalize">{user?.role}</Badge>
+                <Separator className="my-4" />
+                <div className="w-full space-y-3 text-left text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Phone</span>
+                    <span className="font-medium">{user?.phone || "N/A"}</span>
                   </div>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleSaveSettings} className="space-y-5">
-                  <div className="space-y-2">
-                    <Label>System Name</Label>
-                    <Input
-                      value={settings.systemName}
-                      onChange={(e) => setSettings((p) => ({ ...p, systemName: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Daily Order Limit</Label>
-                    <div className="flex items-center gap-3">
-                      <Input
-                        type="number"
-                        min="1"
-                        max="100"
-                        className="w-32"
-                        value={settings.dailyOrderLimit}
-                        onChange={(e) => setSettings((p) => ({ ...p, dailyOrderLimit: e.target.value }))}
-                      />
-                      <span className="text-sm text-muted-foreground">non-urgent orders per day</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Urgent orders are not counted toward this limit. When the limit is reached, new non-urgent orders are automatically scheduled for the next day.
-                    </p>
-                  </div>
-                  <div className="flex items-center justify-between rounded-[10px] border border-border p-4">
-                    <div>
-                      <p className="font-semibold">Enable Notifications</p>
-                      <p className="text-sm text-muted-foreground">Send order status updates to users</p>
-                    </div>
-                    <Switch
-                      checked={settings.enableNotifications}
-                      onCheckedChange={(checked) => setSettings((p) => ({ ...p, enableNotifications: checked }))}
-                    />
-                  </div>
-                  <Button type="submit" loading={loading}>
-                    <Save className="mr-2 h-4 w-4" />Save Settings
-                  </Button>
-                </form>
               </CardContent>
             </Card>
-          )}
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-primary/10">
-                  <Lock className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <CardTitle>Change Password</CardTitle>
-                  <CardDescription>Update your account password</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleChangePassword} className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Current Password</Label>
-                  <Input
-                    type="password"
-                    value={formData.currentPassword}
-                    onChange={(e) => setFormData((p) => ({ ...p, currentPassword: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>New Password</Label>
-                  <Input
-                    type="password"
-                    value={formData.newPassword}
-                    onChange={(e) => setFormData((p) => ({ ...p, newPassword: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Confirm Password</Label>
-                  <Input
-                    type="password"
-                    value={formData.confirmPassword}
-                    onChange={(e) => setFormData((p) => ({ ...p, confirmPassword: e.target.value }))}
-                  />
-                </div>
-                <Button type="submit" loading={loading}>Update Password</Button>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            <div className="space-y-6 lg:col-span-2">
+              {isAdmin && (
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-primary/10">
+                        <Bell className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <CardTitle>System Settings</CardTitle>
+                        <CardDescription>Configure system-wide preferences</CardDescription>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <form onSubmit={handleSaveSettings} className="space-y-5">
+                      <div className="space-y-2">
+                        <Label>System Name</Label>
+                        <Input
+                          value={settings.systemName}
+                          onChange={(e) => setSettings((p) => ({ ...p, systemName: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Daily Order Limit</Label>
+                        <div className="flex items-center gap-3">
+                          <Input
+                            type="number"
+                            min="1"
+                            max="100"
+                            className="w-32"
+                            value={settings.dailyOrderLimit}
+                            onChange={(e) =>
+                              setSettings((p) => ({ ...p, dailyOrderLimit: e.target.value }))
+                            }
+                          />
+                          <span className="text-sm text-muted-foreground">non-urgent orders per day</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Urgent orders are not counted toward this limit. When the limit is reached,
+                          new non-urgent orders are automatically scheduled for the next day.
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-between rounded-[10px] border border-border p-4">
+                        <div>
+                          <p className="font-semibold">Enable Notifications</p>
+                          <p className="text-sm text-muted-foreground">
+                            Send order status updates to users
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.enableNotifications}
+                          onCheckedChange={(checked) =>
+                            setSettings((p) => ({ ...p, enableNotifications: checked }))
+                          }
+                        />
+                      </div>
+                      <Button type="submit" loading={loading}>
+                        <Save className="mr-2 h-4 w-4" />
+                        Save Settings
+                      </Button>
+                    </form>
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-primary/10">
+                      <Lock className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle>Change Password</CardTitle>
+                      <CardDescription>Update your account password</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={handleChangePassword} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Current Password</Label>
+                      <Input
+                        type="password"
+                        value={formData.currentPassword}
+                        onChange={(e) =>
+                          setFormData((p) => ({ ...p, currentPassword: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>New Password</Label>
+                      <Input
+                        type="password"
+                        value={formData.newPassword}
+                        onChange={(e) =>
+                          setFormData((p) => ({ ...p, newPassword: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Confirm Password</Label>
+                      <Input
+                        type="password"
+                        value={formData.confirmPassword}
+                        onChange={(e) =>
+                          setFormData((p) => ({ ...p, confirmPassword: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <Button type="submit" loading={loading}>
+                      Update Password
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
+
+        {isAdmin && (
+          <>
+            <TabsContent value="expense-categories">
+              <Card className="rounded-[16px]">
+                <CardContent className="p-4 sm:p-6">
+                  <ExpenseCategoriesSettings />
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="payment-methods">
+              <Card className="rounded-[16px]">
+                <CardContent className="p-4 sm:p-6">
+                  <PaymentMethodsSettings />
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </>
+        )}
+      </Tabs>
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { generateTransactionNumber } from '../utils/transactionNumber.js';
 
 const generatePaymentId = () => {
   const now = new Date();
@@ -14,6 +15,12 @@ const paymentSchema = new mongoose.Schema(
       type: String,
       unique: true,
       required: true,
+    },
+    transactionNumber: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
     },
     invoiceId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -64,8 +71,18 @@ const paymentSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['cash', 'mobile_money', 'bank'],
+      trim: true,
       default: 'cash',
+    },
+    incomeCategory: {
+      type: String,
+      trim: true,
+      default: 'laundry_service',
+    },
+    referenceNumber: {
+      type: String,
+      default: '',
+      trim: true,
     },
     paymentDate: {
       type: Date,
@@ -97,21 +114,24 @@ paymentSchema.pre('validate', async function (next) {
     return next();
   }
 
-  if (this.paymentId) {
-    return next();
-  }
-
   try {
-    const Payment = mongoose.model('Payment');
-    let paymentId;
-    let exists = true;
+    if (!this.paymentId) {
+      const Payment = mongoose.model('Payment');
+      let paymentId;
+      let exists = true;
 
-    while (exists) {
-      paymentId = generatePaymentId();
-      exists = await Payment.exists({ paymentId });
+      while (exists) {
+        paymentId = generatePaymentId();
+        exists = await Payment.exists({ paymentId });
+      }
+
+      this.paymentId = paymentId;
     }
 
-    this.paymentId = paymentId;
+    if (!this.transactionNumber) {
+      this.transactionNumber = await generateTransactionNumber();
+    }
+
     next();
   } catch (error) {
     next(error);

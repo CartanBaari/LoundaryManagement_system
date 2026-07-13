@@ -3,6 +3,14 @@ import Payment from '../models/Payment.js';
 import Invoice from '../models/Invoice.js';
 import Order from '../models/Order.js';
 import Client from '../models/Client.js';
+import { generateTransactionNumber } from './transactionNumber.js';
+
+const normalizePaymentMethod = (method) => {
+  const value = String(method || 'cash').trim();
+  if (value === 'mobile_money') return 'evc_plus';
+  if (value === 'bank') return 'bank_transfer';
+  return value || 'cash';
+};
 
 export const toSafeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -125,6 +133,8 @@ export const recordPayment = async ({
   paymentDate,
   dueDate,
   notes,
+  incomeCategory,
+  referenceNumber,
 }) => {
   const transactionAmount = Math.max(0, toSafeNumber(amountPaid, 0));
 
@@ -204,6 +214,8 @@ export const recordPayment = async ({
       order.paymentStatus = invoiceStatus;
       await order.save({ session });
 
+      const transactionNumber = await generateTransactionNumber(session);
+
       const [payment] = await Payment.create(
         [
           {
@@ -216,11 +228,14 @@ export const recordPayment = async ({
             amountPaid: transactionAmount,
             remainingBalance: nextRemainingAmount,
             discount: invoice.discount,
-            paymentMethod: ['cash', 'mobile_money', 'bank'].includes(paymentMethod) ? paymentMethod : 'cash',
+            paymentMethod: normalizePaymentMethod(paymentMethod),
+            incomeCategory: incomeCategory || 'laundry_service',
+            referenceNumber: referenceNumber || '',
             paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
             dueDate: invoice.dueDate,
             status: paymentRecordStatus,
             notes: notes || '',
+            transactionNumber,
           },
         ],
         { session }
@@ -232,6 +247,149 @@ export const recordPayment = async ({
     });
 
     return createdPayment;
+  } finally {
+    session.endSession();
+  }
+};
+
+const syncInvoiceFromPayments = async (invoice, order, session) => {
+  const payments = await Payment.find({ invoiceId: invoice._id }).session(session);
+  const netTotal = Math.max(0, invoice.totalAmount - invoice.discount);
+  const paidAmount = payments.reduce((sum, payment) => sum + toSafeNumber(payment.amountPaid, 0), 0);
+  const remainingAmount = Math.max(0, netTotal - paidAmount);
+  const invoiceStatus = resolveInvoiceStatus(paidAmount, netTotal);
+
+  invoice.paidAmount = paidAmount;
+  invoice.remainingAmount = remainingAmount;
+  invoice.status = invoiceStatus;
+  await invoice.save({ session });
+
+  if (order) {
+    order.paymentStatus = invoiceStatus;
+    await order.save({ session });
+  }
+
+  // Refresh remainingBalance on each payment record to match current invoice state
+  for (const payment of payments) {
+    payment.remainingBalance = remainingAmount;
+    payment.status = resolvePaymentRecordStatus(invoiceStatus);
+    await payment.save({ session });
+  }
+
+  return { paidAmount, remainingAmount, invoiceStatus };
+};
+
+export const updatePaymentRecord = async (paymentId, updates = {}) => {
+  const session = await mongoose.startSession();
+
+  try {
+    let updatedPayment;
+
+    await session.withTransaction(async () => {
+      const payment = await Payment.findById(paymentId).session(session);
+
+      if (!payment) {
+        const error = new Error('Payment not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const previousAmount = toSafeNumber(payment.amountPaid, 0);
+      const nextAmount =
+        updates.amountPaid !== undefined ? Math.max(0, toSafeNumber(updates.amountPaid, 0)) : previousAmount;
+
+      if (updates.paymentMethod !== undefined) {
+        payment.paymentMethod = normalizePaymentMethod(updates.paymentMethod);
+      }
+      if (updates.incomeCategory !== undefined) {
+        payment.incomeCategory = updates.incomeCategory;
+      }
+      if (updates.referenceNumber !== undefined) {
+        payment.referenceNumber = String(updates.referenceNumber).trim();
+      }
+      if (updates.notes !== undefined) {
+        payment.notes = String(updates.notes).trim();
+      }
+      if (updates.paymentDate !== undefined) {
+        payment.paymentDate = updates.paymentDate ? new Date(updates.paymentDate) : payment.paymentDate;
+      }
+      if (updates.customerName !== undefined) {
+        payment.customerName = String(updates.customerName).trim();
+      }
+
+      payment.amountPaid = nextAmount;
+      await payment.save({ session });
+
+      const invoice = payment.invoiceId
+        ? await Invoice.findById(payment.invoiceId).session(session)
+        : await Invoice.findOne({ orderId: payment.orderId }).session(session);
+      const order = await Order.findById(payment.orderId).session(session);
+
+      if (invoice) {
+        const netTotal = Math.max(0, invoice.totalAmount - invoice.discount);
+        const otherPayments = await Payment.find({
+          invoiceId: invoice._id,
+          _id: { $ne: payment._id },
+        }).session(session);
+        const otherPaid = otherPayments.reduce((sum, row) => sum + toSafeNumber(row.amountPaid, 0), 0);
+        const totalPaid = otherPaid + nextAmount;
+
+        if (totalPaid > netTotal) {
+          const error = new Error(
+            `Payment exceeds remaining balance. Max allowed: ${Math.max(0, netTotal - otherPaid).toFixed(2)}`
+          );
+          error.statusCode = 400;
+          throw error;
+        }
+
+        await syncInvoiceFromPayments(invoice, order, session);
+        await recalculateClientOutstandingBalance(payment.clientId, session);
+      }
+
+      updatedPayment = await Payment.findById(payment._id)
+        .session(session)
+        .populate('invoiceId', 'invoiceNumber paidAmount remainingAmount status totalAmount discount')
+        .populate({
+          path: 'orderId',
+          select: 'orderNumber totalAmount paymentStatus status userId userModel',
+          populate: { path: 'userId', select: 'name phone email' },
+        })
+        .populate('clientId', 'name phone email outstandingBalance');
+    });
+
+    return updatedPayment;
+  } finally {
+    session.endSession();
+  }
+};
+
+export const deletePaymentRecord = async (paymentId) => {
+  const session = await mongoose.startSession();
+
+  try {
+    await session.withTransaction(async () => {
+      const payment = await Payment.findById(paymentId).session(session);
+
+      if (!payment) {
+        const error = new Error('Payment not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const clientId = payment.clientId;
+      const invoice = payment.invoiceId
+        ? await Invoice.findById(payment.invoiceId).session(session)
+        : await Invoice.findOne({ orderId: payment.orderId }).session(session);
+      const order = await Order.findById(payment.orderId).session(session);
+
+      await Payment.deleteOne({ _id: payment._id }).session(session);
+
+      if (invoice) {
+        await syncInvoiceFromPayments(invoice, order, session);
+      }
+
+      await recalculateClientOutstandingBalance(clientId, session);
+    });
   } finally {
     session.endSession();
   }
@@ -255,6 +413,11 @@ export const getPaymentOverviewStats = async () => {
   const now = new Date();
   const { start: todayStart, end: todayEnd } = getDayBounds(now);
 
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  monthStart.setHours(0, 0, 0, 0);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  monthEnd.setHours(23, 59, 59, 999);
+
   const lastWeekStart = new Date(now);
   lastWeekStart.setDate(lastWeekStart.getDate() - 7);
   lastWeekStart.setHours(0, 0, 0, 0);
@@ -265,6 +428,7 @@ export const getPaymentOverviewStats = async () => {
   const [
     collectedAgg,
     todayCollectedAgg,
+    monthlyCollectedAgg,
     lastWeekCollectedAgg,
     prevWeekCollectedAgg,
     outstandingAgg,
@@ -275,6 +439,10 @@ export const getPaymentOverviewStats = async () => {
     Payment.aggregate([{ $group: { _id: null, total: { $sum: '$amountPaid' } } }]),
     Payment.aggregate([
       { $match: { paymentDate: { $gte: todayStart, $lte: todayEnd } } },
+      { $group: { _id: null, total: { $sum: '$amountPaid' } } },
+    ]),
+    Payment.aggregate([
+      { $match: { paymentDate: { $gte: monthStart, $lte: monthEnd } } },
       { $group: { _id: null, total: { $sum: '$amountPaid' } } },
     ]),
     Payment.aggregate([
@@ -296,6 +464,7 @@ export const getPaymentOverviewStats = async () => {
 
   const totalCollected = toSafeNumber(collectedAgg[0]?.total, 0);
   const todayCollected = toSafeNumber(todayCollectedAgg[0]?.total, 0);
+  const monthlyCollected = toSafeNumber(monthlyCollectedAgg[0]?.total, 0);
   const lastWeekCollected = toSafeNumber(lastWeekCollectedAgg[0]?.total, 0);
   const prevWeekCollected = toSafeNumber(prevWeekCollectedAgg[0]?.total, 0);
   const totalOutstanding = toSafeNumber(outstandingAgg[0]?.total, 0);
@@ -306,6 +475,8 @@ export const getPaymentOverviewStats = async () => {
     todayRevenue: todayCollected,
     totalCollected,
     todayCollected,
+    monthlyCollected,
+    monthlyIncome: monthlyCollected,
     lastWeekCollected,
     prevWeekCollected,
     totalOutstanding,
